@@ -1,1 +1,162 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
+body {
+  font-family: Arial, sans-serif;
+  background: #0b1020;
+  color: white;
+}
+
+.app {
+  max-width: 1100px;
+  margin: auto;
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22px;
+  border-bottom: 1px solid #252d40;
+}
+
+.topbar h1 {
+  font-size: 25px;
+}
+
+.topbar h1 span {
+  color: #8b5cf6;
+  margin-left: 5px;
+}
+
+.menu {
+  display: flex;
+  justify-content: space-around;
+  padding: 15px 5px;
+  border-bottom: 1px solid #252d40;
+}
+
+.menu button,
+.actions button {
+  background: none;
+  border: none;
+  color: #aab2c5;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.menu button {
+  flex-direction: column;
+  font-size: 12px;
+}
+
+.menu button.selected {
+  color: #a78bfa;
+}
+
+main {
+  padding: 25px 16px;
+}
+
+main h2 {
+  margin-bottom: 22px;
+}
+
+.stories {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  padding-bottom: 25px;
+}
+
+.story {
+  text-align: center;
+  min-width: 62px;
+}
+
+.story small {
+  display: block;
+  margin-top: 7px;
+  color: #cbd5e1;
+}
+
+.avatar {
+  width: 55px;
+  height: 55px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  display: grid;
+  place-items: center;
+  font-weight: bold;
+  font-size: 20px;
+  margin: auto;
+}
+
+.story.add .avatar {
+  background: #27324a;
+}
+
+.story.add {
+  padding-top: 10px;
+}
+
+.post {
+  background: #151d30;
+  border: 1px solid #26334c;
+  border-radius: 15px;
+  padding: 15px;
+  max-width: 600px;
+}
+
+.post-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.post-image {
+  min-height: 260px;
+  background: linear-gradient(135deg, #27205b, #8b5cf6, #db2777);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  font-size: 19px;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-around;
+  padding: 18px 0;
+}
+
+.actions button {
+  font-size: 13px;
+}
+
+.post p {
+  color: #dbe2f0;
+}
+
+@media (max-width: 500px) {
+  .menu {
+    padding: 12px 2px;
+  }
+
+  .menu button {
+    font-size: 10px;
+  }
+
+  main {
+    padding: 20px 12px;
+  }
+  }
