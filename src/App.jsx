@@ -832,3 +832,220 @@ export default function App() {
                     "A user"}
                 </strong>{" "}
                 {item.messag
+{item.message}
+
+                <br />
+
+                <small>
+                  {new Date(item.created_at).toLocaleString()}
+                </small>
+
+                {!item.is_read && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => markNotificationRead(item.id)}
+                    >
+                      Mark as Read
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </section>
+        )}
+
+        <hr />
+
+        <h2>Your Profile</h2>
+
+        {profile && (
+          <div>
+            {avatarUrl && (
+              <img
+                src={avatarUrl}
+                alt="Profile"
+                style={{
+                  width: 90,
+                  height: 90,
+                  borderRadius: "50%",
+                  objectFit: "cover"
+                }}
+              />
+            )}
+
+            <p>
+              <strong>{profile.full_name || profile.username}</strong>
+            </p>
+            <p>@{profile.username}</p>
+            <p>{profile.bio}</p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setEditing(!editing)}
+        >
+          {editing ? "Cancel Editing" : "Edit Profile"}
+        </button>
+
+        {editing && (
+          <form onSubmit={saveProfile}>
+            <input
+              placeholder="Username"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              required
+            />
+
+            <input
+              placeholder="Full name"
+              value={fullName}
+              onChange={e => setFullName(e.target.value)}
+            />
+
+            <textarea
+              placeholder="Your bio"
+              value={bio}
+              onChange={e => setBio(e.target.value)}
+            />
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={uploadAvatar}
+            />
+
+            <button type="submit" disabled={loading}>
+              Save Profile
+            </button>
+          </form>
+        )}
+
+        <hr />
+
+        <h2>Create a Post</h2>
+
+        <form onSubmit={createPost}>
+          <textarea
+            placeholder="What's happening?"
+            value={postContent}
+            onChange={e => setPostContent(e.target.value)}
+            rows={4}
+          />
+
+          <input
+            type="file"
+            accept="image/*"
+            onChange={e => setPostImage(e.target.files?.[0] || null)}
+          />
+
+          <button type="submit" disabled={loading}>
+            Publish Post
+          </button>
+        </form>
+
+        <hr />
+
+        <h2>Home Feed</h2>
+
+        <button type="button" onClick={loadPosts}>
+          Refresh Feed
+        </button>
+
+        {posts.map(post => (
+          <article
+            key={post.id}
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 10,
+              padding: 12,
+              marginTop: 15,
+              textAlign: "left"
+            }}
+          >
+            <strong>
+              {post.author?.full_name ||
+                post.author?.username ||
+                "Rays Connect User"}
+            </strong>
+
+            <p>{post.content}</p>
+
+            {post.image_url && (
+              <img
+                src={post.image_url}
+                alt="Post"
+                style={{
+                  width: "100%",
+                  maxHeight: 350,
+                  objectFit: "contain"
+                }}
+              />
+            )}
+
+            <small>
+              {new Date(post.created_at).toLocaleString()}
+            </small>
+
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                onClick={() => toggleLike(post)}
+              >
+                {post.likedByMe ? "Unlike" : "Like"}
+                {" "}({post.likesCount})
+              </button>
+
+              {post.user_id === session.user.id && (
+                <button
+                  type="button"
+                  onClick={() => deletePost(post.id)}
+                >
+                  Delete Post
+                </button>
+              )}
+            </div>
+
+            <h3>Comments</h3>
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                addComment(post.id);
+              }}
+            >
+              <textarea
+                placeholder="Write a comment..."
+                value={commentDrafts[post.id] || ""}
+                onChange={e =>
+                  setCommentDrafts(current => ({
+                    ...current,
+                    [post.id]: e.target.value
+                  }))
+                }
+                maxLength={1000}
+                rows={2}
+              />
+
+              <button type="submit" disabled={loading}>
+                Comment
+              </button>
+            </form>
+
+            {post.comments
+              .filter(comment => !comment.parent_comment_id)
+              .map(comment => renderComment(post, comment))}
+          </article>
+        ))}
+
+        <hr />
+
+        <button type="button" onClick={logout}>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
