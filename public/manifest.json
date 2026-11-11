@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Rays Connect",
+  "short_name": "Rays Connect",
+  "description": "Connect, share updates, and stay in touch with Rays Connect.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a1020",
+  "theme_color": "#0a1020",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
