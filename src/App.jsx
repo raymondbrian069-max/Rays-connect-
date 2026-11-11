@@ -161,7 +161,7 @@ export default function App() {
 
   async function addComment(postId,parentId=null){
     const draftKey=parentId||postId;
-    const content=(parentId?replyDrafts[draftKey]:commentDrafts[draftKey]||"").trim();
+    const content=((parentId?replyDrafts[draftKey]:commentDrafts[draftKey])||"").trim();
     if(!content){setMessage("Write a comment first.");return;}
     setLoading(true);
     const payload={post_id:postId,user_id:session.user.id,content,...(parentId?{parent_comment_id:parentId}:{})};
