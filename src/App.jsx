@@ -97,6 +97,8 @@ export default function App() {
   }
 
   async function loadPosts() {
+    if (!session) return;
+
     const { data, error } = await supabase
       .from("posts")
       .select("*")
@@ -195,6 +197,7 @@ export default function App() {
     }
 
     const items = data || [];
+
     const actorIds = [
       ...new Set(items.map(item => item.actor_id).filter(Boolean))
     ];
@@ -218,12 +221,16 @@ export default function App() {
     setNotifications(
       items.map(item => ({
         ...item,
-        actor: actorProfiles.find(person => person.id === item.actor_id)
+        actor: actorProfiles.find(
+          person => person.id === item.actor_id
+        )
       }))
     );
   }
 
   async function markNotificationRead(notificationId) {
+    if (!session) return;
+
     const { error } = await supabase
       .from("notifications")
       .update({ is_read: true })
@@ -244,6 +251,8 @@ export default function App() {
   }
 
   async function markAllNotificationsRead() {
+    if (!session) return;
+
     const unreadIds = notifications
       .filter(item => !item.is_read)
       .map(item => item.id);
@@ -274,7 +283,8 @@ export default function App() {
           ? {
               ...item,
               likedByMe: !item.likedByMe,
-              likesCount: item.likesCount + (item.likedByMe ? -1 : 1)
+              likesCount:
+                item.likesCount + (item.likedByMe ? -1 : 1)
             }
           : item
       )
@@ -306,6 +316,7 @@ export default function App() {
       setMessage(error.message);
     } else {
       await loadPosts();
+      await loadNotifications();
     }
   }
 
@@ -338,6 +349,7 @@ export default function App() {
 
       setMessage("Comment added successfully!");
       await loadPosts();
+      await loadNotifications();
     }
 
     setLoading(false);
@@ -373,6 +385,7 @@ export default function App() {
 
       setMessage("Reply added successfully!");
       await loadPosts();
+      await loadNotifications();
     }
 
     setLoading(false);
@@ -420,7 +433,9 @@ export default function App() {
           <small> @{comment.author.username}</small>
         )}
 
-        <p style={{ whiteSpace: "pre-wrap" }}>{comment.content}</p>
+        <p style={{ whiteSpace: "pre-wrap" }}>
+          {comment.content}
+        </p>
 
         <small>
           {new Date(comment.created_at).toLocaleString()}
@@ -449,7 +464,10 @@ export default function App() {
           )}
         </div>
 
-        {Object.prototype.hasOwnProperty.call(replyDrafts, comment.id) && (
+        {Object.prototype.hasOwnProperty.call(
+          replyDrafts,
+          comment.id
+        ) && (
           <form
             onSubmit={e => {
               e.preventDefault();
@@ -514,7 +532,9 @@ export default function App() {
 
         if (error) throw error;
 
-        setMessage("Account created! Check your email to confirm.");
+        setMessage(
+          "Account created! Check your email to confirm."
+        );
         setMode("login");
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -535,7 +555,10 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+    if (
+      !file.type.startsWith("image/") ||
+      file.size > 5 * 1024 * 1024
+    ) {
       setMessage("Choose an image smaller than 5 MB.");
       e.target.value = "";
       return;
@@ -675,7 +698,9 @@ export default function App() {
           <h1>Rays<span>Connect</span></h1>
           <p>Your moments. Your people.</p>
 
-          <h2>{mode === "signup" ? "Create Account" : "Welcome Back"}</h2>
+          <h2>
+            {mode === "signup" ? "Create Account" : "Welcome Back"}
+          </h2>
 
           <form onSubmit={handleSubmit}>
             {mode === "signup" && (
@@ -706,14 +731,20 @@ export default function App() {
             />
 
             <button type="submit" disabled={loading}>
-              {loading ? "Please wait..." : mode === "signup" ? "Create Account" : "Sign In"}
+              {loading
+                ? "Please wait..."
+                : mode === "signup"
+                ? "Create Account"
+                : "Sign In"}
             </button>
           </form>
 
           {message && <p>{message}</p>}
 
           <p>
-            {mode === "signup" ? "Already have an account?" : "New to Rays Connect?"}
+            {mode === "signup"
+              ? "Already have an account?"
+              : "New to Rays Connect?"}
             {" "}
             <button
               type="button"
@@ -730,7 +761,9 @@ export default function App() {
     );
   }
 
-  const unreadCount = notifications.filter(item => !item.is_read).length;
+  const unreadCount = notifications.filter(
+    item => !item.is_read
+  ).length;
 
   return (
     <div className="auth-page">
@@ -798,20 +831,4 @@ export default function App() {
                     item.actor?.username ||
                     "A user"}
                 </strong>{" "}
-                {item.message}
-
-                <br />
-
-                <small>
-                  {new Date(item.created_at).toLocaleString()}
-                </small>
-
-                {!item.is_read && (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => markNotificationRead(item.id)}
-                    >
-                      Mark as Read
-                    </button>
-         
+                {item.messag
