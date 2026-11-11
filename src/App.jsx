@@ -6,8 +6,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
-  const [commentDrafts, setCommentDrafts] = useState({});
-  const [replyDrafts, setReplyDrafts] = useState({});
+
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -22,6 +21,10 @@ export default function App() {
 
   const [postContent, setPostContent] = useState("");
   const [postImage, setPostImage] = useState(null);
+
+  const [commentDrafts, setCommentDrafts] = useState({});
+  const [replyDrafts, setReplyDrafts] = useState({});
+
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -33,9 +36,11 @@ export default function App() {
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      setSession(currentSession);
-    });
+    } = supabase.auth.onAuthStateChange(
+      (_event, currentSession) => {
+        setSession(currentSession);
+      }
+    );
 
     return () => subscription.unsubscribe();
   }, []);
@@ -52,6 +57,8 @@ export default function App() {
       setShowNotifications(false);
     }
   }, [session]);
+
+  // PROFILE
 
   async function loadProfile() {
     const user = session.user;
@@ -73,12 +80,15 @@ export default function App() {
       setFullName(data.full_name || "");
       setBio(data.bio || "");
       setAvatarUrl(data.avatar_url || "");
-    } else {
-      const initialUsername =
-        user.user_metadata?.username ||
-        `${user.email.split("@")[0]}_${user.id.slice(0, 5)}`;
+      return;
+    }
 
-      const { data: created, error: createError } = await supabase
+    const initialUsername =
+      user.user_metadata?.username ||
+      `${user.email.split("@")[0]}_${user.id.slice(0, 5)}`;
+
+    const { data: created, error: createError } =
+      await supabase
         .from("user_profiles")
         .insert({
           id: user.id,
@@ -87,14 +97,86 @@ export default function App() {
         .select()
         .single();
 
-      if (createError) {
-        setMessage(createError.message);
-      } else {
-        setProfile(created);
-        setUsername(created.username);
-      }
+    if (createError) {
+      setMessage(createError.message);
+    } else {
+      setProfile(created);
+      setUsername(created.username || "");
     }
   }
+
+  async function saveProfile(e) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .update({
+        username: username.trim(),
+        full_name: fullName.trim(),
+        bio: bio.trim(),
+        avatar_url: avatarUrl
+      })
+      .eq("id", session.user.id)
+      .select()
+      .single();
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setProfile(data);
+      setEditing(false);
+      setMessage("Profile updated successfully!");
+      await loadPosts();
+    }
+
+    setLoading(false);
+  }
+
+  async function uploadAvatar(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (
+      !file.type.startsWith("image/") ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      setMessage("Choose an image smaller than 5 MB.");
+      e.target.value = "";
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const filePath =
+        `${session.user.id}/${Date.now()}-${file.name.replace(
+          /[^a-zA-Z0-9._-]/g,
+          "_"
+        )}`;
+
+      const { data, error } = await supabase.storage
+        .from("profile-photos")
+        .upload(filePath, file);
+
+      if (error) throw error;
+
+      const { data: publicData } = supabase.storage
+        .from("profile-photos")
+        .getPublicUrl(data.path);
+
+      setAvatarUrl(publicData.publicUrl);
+      setMessage("Photo uploaded. Save your profile.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  }
+
+  // POSTS AND NEWS FEED
 
   async function loadPosts() {
     if (!session) return;
@@ -109,30 +191,34 @@ export default function App() {
       return;
     }
 
-    const { data: likesData, error: likesError } = await supabase
-      .from("likes")
-      .select("post_id, user_id");
+    const { data: likesData, error: likesError } =
+      await supabase
+        .from("likes")
+        .select("post_id, user_id");
 
     if (likesError) {
       setMessage(likesError.message);
       return;
     }
 
-    const { data: commentsData, error: commentsError } = await supabase
-      .from("comments")
-      .select("*")
-      .order("created_at", { ascending: true });
+    const { data: commentsData, error: commentsError } =
+      await supabase
+        .from("comments")
+        .select("*")
+        .order("created_at", { ascending: true });
 
     if (commentsError) {
       setMessage(commentsError.message);
       return;
     }
 
+    const allPosts = data || [];
     const allComments = commentsData || [];
+    const allLikes = likesData || [];
 
     const userIds = [
       ...new Set([
-        ...(data || []).map(post => post.user_id),
+        ...allPosts.map(post => post.user_id),
         ...allComments.map(comment => comment.user_id)
       ])
     ];
@@ -140,10 +226,11 @@ export default function App() {
     let profiles = [];
 
     if (userIds.length > 0) {
-      const { data: profileData, error: profileError } = await supabase
-        .from("user_profiles")
-        .select("id, username, full_name, avatar_url")
-        .in("id", userIds);
+      const { data: profileData, error: profileError } =
+        await supabase
+          .from("user_profiles")
+          .select("id, username, full_name, avatar_url")
+          .in("id", userIds);
 
       if (profileError) {
         setMessage(profileError.message);
@@ -153,10 +240,8 @@ export default function App() {
       profiles = profileData || [];
     }
 
-    const allLikes = likesData || [];
-
     setPosts(
-      (data || []).map(post => {
+      allPosts.map(post => {
         const postLikes = allLikes.filter(
           like => like.post_id === post.id
         );
@@ -165,12 +250,16 @@ export default function App() {
           .filter(comment => comment.post_id === post.id)
           .map(comment => ({
             ...comment,
-            author: profiles.find(p => p.id === comment.user_id)
+            author: profiles.find(
+              person => person.id === comment.user_id
+            )
           }));
 
         return {
           ...post,
-          author: profiles.find(p => p.id === post.user_id),
+          author: profiles.find(
+            person => person.id === post.user_id
+          ),
           likesCount: postLikes.length,
           likedByMe: postLikes.some(
             like => like.user_id === session.user.id
@@ -181,98 +270,78 @@ export default function App() {
     );
   }
 
-  async function loadNotifications() {
-    if (!session) return;
+  async function createPost(e) {
+    e.preventDefault();
 
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("recipient_id", session.user.id)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (error) {
-      setMessage(error.message);
+    if (!postContent.trim() && !postImage) {
+      setMessage("Write something or choose a photo.");
       return;
     }
 
-    const items = data || [];
+    setLoading(true);
+    setMessage("Publishing your post...");
 
-    const actorIds = [
-      ...new Set(items.map(item => item.actor_id).filter(Boolean))
-    ];
+    try {
+      let imageUrl = null;
 
-    let actorProfiles = [];
+      if (postImage) {
+        const filePath =
+          `posts/${session.user.id}/${Date.now()}-${postImage.name.replace(
+            /[^a-zA-Z0-9._-]/g,
+            "_"
+          )}`;
 
-    if (actorIds.length > 0) {
-      const { data: profileData, error: profileError } = await supabase
-        .from("user_profiles")
-        .select("id, username, full_name")
-        .in("id", actorIds);
+        const { data, error } = await supabase.storage
+          .from("profile-photos")
+          .upload(filePath, postImage);
 
-      if (profileError) {
-        setMessage(profileError.message);
-        return;
+        if (error) throw error;
+
+        const { data: publicData } = supabase.storage
+          .from("profile-photos")
+          .getPublicUrl(data.path);
+
+        imageUrl = publicData.publicUrl;
       }
 
-      actorProfiles = profileData || [];
-    }
+      const { error } = await supabase
+        .from("posts")
+        .insert({
+          user_id: session.user.id,
+          content: postContent.trim(),
+          image_url: imageUrl
+        });
 
-    setNotifications(
-      items.map(item => ({
-        ...item,
-        actor: actorProfiles.find(
-          person => person.id === item.actor_id
-        )
-      }))
-    );
+      if (error) throw error;
+
+      setPostContent("");
+      setPostImage(null);
+      setMessage("Your post has been published!");
+
+      await loadPosts();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function markNotificationRead(notificationId) {
-    if (!session) return;
-
+  async function deletePost(postId) {
     const { error } = await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("id", notificationId)
-      .eq("recipient_id", session.user.id);
+      .from("posts")
+      .delete()
+      .eq("id", postId)
+      .eq("user_id", session.user.id);
 
     if (error) {
       setMessage(error.message);
     } else {
-      setNotifications(current =>
-        current.map(item =>
-          item.id === notificationId
-            ? { ...item, is_read: true }
-            : item
-        )
-      );
+      setMessage("Post deleted.");
+      await loadPosts();
     }
   }
 
-  async function markAllNotificationsRead() {
-    if (!session) return;
-
-    const unreadIds = notifications
-      .filter(item => !item.is_read)
-      .map(item => item.id);
-
-    if (unreadIds.length === 0) return;
-
-    const { error } = await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .in("id", unreadIds)
-      .eq("recipient_id", session.user.id);
-
-    if (error) {
-      setMessage(error.message);
-    } else {
-      setNotifications(current =>
-        current.map(item => ({ ...item, is_read: true }))
-      );
-    }
-  }
+  // LIKES
 
   async function toggleLike(post) {
     const previousPosts = posts;
@@ -320,6 +389,8 @@ export default function App() {
     }
   }
 
+  // COMMENTS
+
   async function addComment(postId) {
     const content = (commentDrafts[postId] || "").trim();
 
@@ -348,6 +419,7 @@ export default function App() {
       }));
 
       setMessage("Comment added successfully!");
+
       await loadPosts();
       await loadNotifications();
     }
@@ -356,7 +428,8 @@ export default function App() {
   }
 
   async function addReply(postId, parentCommentId) {
-    const content = (replyDrafts[parentCommentId] || "").trim();
+    const content =
+      (replyDrafts[parentCommentId] || "").trim();
 
     if (!content) {
       setMessage("Write your reply first.");
@@ -384,6 +457,7 @@ export default function App() {
       }));
 
       setMessage("Reply added successfully!");
+
       await loadPosts();
       await loadNotifications();
     }
@@ -444,12 +518,12 @@ export default function App() {
         <div style={{ marginTop: 8 }}>
           <button
             type="button"
-            onClick={() => {
+            onClick={() =>
               setReplyDrafts(current => ({
                 ...current,
                 [comment.id]: current[comment.id] || ""
-              }));
-            }}
+              }))
+            }
           >
             Reply
           </button>
@@ -514,6 +588,133 @@ export default function App() {
     );
   }
 
+  // NOTIFICATIONS
+
+  async function loadNotifications() {
+    if (!session) return;
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("recipient_id", session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    const items = data || [];
+
+    const actorIds = [
+      ...new Set(
+        items.map(item => item.actor_id).filter(Boolean)
+      )
+    ];
+
+    let actorProfiles = [];
+
+    if (actorIds.length > 0) {
+      const { data: profileData, error: profileError } =
+        await supabase
+          .from("user_profiles")
+          .select("id, username, full_name, avatar_url")
+          .in("id", actorIds);
+
+      if (profileError) {
+        setMessage(profileError.message);
+        return;
+      }
+
+      actorProfiles = profileData || [];
+    }
+
+    setNotifications(
+      items.map(item => ({
+        ...item,
+        actor: actorProfiles.find(
+          person => person.id === item.actor_id
+        )
+      }))
+    );
+  }
+
+  async function markNotificationRead(notificationId) {
+    if (!session) return;
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("id", notificationId)
+      .eq("recipient_id", session.user.id);
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setNotifications(current =>
+        current.map(item =>
+          item.id === notificationId
+            ? { ...item, is_read: true }
+            : item
+        )
+      );
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    if (!session) return;
+
+    const unreadIds = notifications
+      .filter(item => !item.is_read)
+      .map(item => item.id);
+
+    if (unreadIds.length === 0) return;
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .in("id", unreadIds)
+      .eq("recipient_id", session.user.id);
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setNotifications(current =>
+        current.map(item => ({
+          ...item,
+          is_read: true
+        }))
+      );
+    }
+  }
+
+  function getNotificationText(item) {
+    if (item.message) return item.message;
+
+    const type = String(item.type || "").toLowerCase();
+
+    if (type.includes("like")) {
+      return "liked your post.";
+    }
+
+    if (type.includes("reply")) {
+      return "replied to your comment.";
+    }
+
+    if (type.includes("comment")) {
+      return "commented on your post.";
+    }
+
+    if (type.includes("follow")) {
+      return "started following you.";
+    }
+
+    return "interacted with you.";
+  }
+
+  // AUTHENTICATION
+
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
@@ -525,7 +726,9 @@ export default function App() {
           email: email.trim(),
           password,
           options: {
-            data: { username: username.trim() },
+            data: {
+              username: username.trim()
+            },
             emailRedirectTo: window.location.origin
           }
         });
@@ -535,12 +738,14 @@ export default function App() {
         setMessage(
           "Account created! Check your email to confirm."
         );
+
         setMode("login");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password
-        });
+        const { error } =
+          await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password
+          });
 
         if (error) throw error;
       }
@@ -548,158 +753,33 @@ export default function App() {
       setMessage(error.message);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function uploadAvatar(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (
-      !file.type.startsWith("image/") ||
-      file.size > 5 * 1024 * 1024
-    ) {
-      setMessage("Choose an image smaller than 5 MB.");
-      e.target.value = "";
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const filePath =
-        `${session.user.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-
-      const { data, error } = await supabase.storage
-        .from("profile-photos")
-        .upload(filePath, file);
-
-      if (error) throw error;
-
-      const { data: publicData } = supabase.storage
-        .from("profile-photos")
-        .getPublicUrl(data.path);
-
-      setAvatarUrl(publicData.publicUrl);
-      setMessage("Photo uploaded. Save your profile.");
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      setLoading(false);
-      e.target.value = "";
-    }
-  }
-
-  async function saveProfile(e) {
-    e.preventDefault();
-    setLoading(true);
-    setMessage("");
-
-    const { data, error } = await supabase
-      .from("user_profiles")
-      .update({
-        username: username.trim(),
-        full_name: fullName.trim(),
-        bio: bio.trim(),
-        avatar_url: avatarUrl
-      })
-      .eq("id", session.user.id)
-      .select()
-      .single();
-
-    if (error) {
-      setMessage(error.message);
-    } else {
-      setProfile(data);
-      setEditing(false);
-      setMessage("Profile updated successfully!");
-      await loadPosts();
-    }
-
-    setLoading(false);
-  }
-
-  async function createPost(e) {
-    e.preventDefault();
-
-    if (!postContent.trim() && !postImage) {
-      setMessage("Write something or choose a photo.");
-      return;
-    }
-
-    setLoading(true);
-    setMessage("Publishing your post...");
-
-    try {
-      let imageUrl = null;
-
-      if (postImage) {
-        const filePath =
-          `posts/${session.user.id}/${Date.now()}-${postImage.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-
-        const { data, error } = await supabase.storage
-          .from("profile-photos")
-          .upload(filePath, postImage);
-
-        if (error) throw error;
-
-        const { data: publicData } = supabase.storage
-          .from("profile-photos")
-          .getPublicUrl(data.path);
-
-        imageUrl = publicData.publicUrl;
-      }
-
-      const { error } = await supabase
-        .from("posts")
-        .insert({
-          user_id: session.user.id,
-          content: postContent.trim(),
-          image_url: imageUrl
-        });
-
-      if (error) throw error;
-
-      setPostContent("");
-      setPostImage(null);
-      setMessage("Your post has been published!");
-      await loadPosts();
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function deletePost(postId) {
-    const { error } = await supabase
-      .from("posts")
-      .delete()
-      .eq("id", postId)
-      .eq("user_id", session.user.id);
-
-    if (error) {
-      setMessage(error.message);
-    } else {
-      setMessage("Post deleted.");
-      await loadPosts();
     }
   }
 
   async function logout() {
     const { error } = await supabase.auth.signOut();
-    if (error) setMessage(error.message);
+
+    if (error) {
+      setMessage(error.message);
+    }
   }
+
+  // AUTHENTICATION PAGE
 
   if (!session) {
     return (
       <div className="auth-page">
         <div className="auth-card">
-          <h1>Rays<span>Connect</span></h1>
+          <h1>
+            Rays<span>Connect</span>
+          </h1>
+
           <p>Your moments. Your people.</p>
 
           <h2>
-            {mode === "signup" ? "Create Account" : "Welcome Back"}
+            {mode === "signup"
+              ? "Create Account"
+              : "Welcome Back"}
           </h2>
 
           <form onSubmit={handleSubmit}>
@@ -744,12 +824,14 @@ export default function App() {
           <p>
             {mode === "signup"
               ? "Already have an account?"
-              : "New to Rays Connect?"}
-            {" "}
+              : "New to Rays Connect?"}{" "}
+
             <button
               type="button"
               onClick={() => {
-                setMode(mode === "signup" ? "login" : "signup");
+                setMode(
+                  mode === "signup" ? "login" : "signup"
+                );
                 setMessage("");
               }}
             >
@@ -761,19 +843,35 @@ export default function App() {
     );
   }
 
+  // UNREAD NOTIFICATION COUNT
+
   const unreadCount = notifications.filter(
     item => !item.is_read
   ).length;
 
+  // MAIN APPLICATION
+
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>Rays<span>Connect</span></h1>
+
+        <h1>
+          Rays<span>Connect</span>
+        </h1>
+
         <p>Your moments. Your people.</p>
 
-        {message && <p>{message}</p>}
+        {message && (
+          <p style={{ padding: 8 }}>
+            {message}
+          </p>
+        )}
 
-        <div style={{ margin: "12px 0" }}>
+        <hr />
+
+        {/* NOTIFICATIONS */}
+
+        <section>
           <button
             type="button"
             onClick={() => {
@@ -786,49 +884,4 @@ export default function App() {
 
           <button
             type="button"
-            onClick={loadNotifications}
-          >
-            Refresh Notifications
-          </button>
-        </div>
-
-        {showNotifications && (
-          <section
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 10,
-              padding: 12,
-              marginBottom: 16,
-              textAlign: "left"
-            }}
-          >
-            <h3>Your Notifications</h3>
-
-            {notifications.length === 0 && (
-              <p>No notifications yet.</p>
-            )}
-
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={markAllNotificationsRead}
-              >
-                Mark All as Read
-              </button>
-            )}
-
-            {notifications.map(item => (
-              <div
-                key={item.id}
-                style={{
-                  padding: 10,
-                  borderBottom: "1px solid #eee",
-                  background: item.is_read ? "#fff" : "#eef5ff"
-                }}
-              >
-                <strong>
-                  {item.actor?.full_name ||
-                    item.actor?.username ||
-                    "A user"}
-                </strong>{" "}
-            
+            on
