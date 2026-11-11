@@ -7,6 +7,7 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
   const [commentDrafts, setCommentDrafts] = useState({});
+  const [replyDrafts, setReplyDrafts] = useState({});
 
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -121,6 +122,7 @@ export default function App() {
     }
 
     const allComments = commentsData || [];
+
     const userIds = [
       ...new Set([
         ...data.map(post => post.user_id),
@@ -224,11 +226,6 @@ export default function App() {
       return;
     }
 
-    if (content.length > 1000) {
-      setMessage("Your comment must be 1000 characters or fewer.");
-      return;
-    }
-
     setLoading(true);
     setMessage("");
 
@@ -255,6 +252,41 @@ export default function App() {
     setLoading(false);
   }
 
+  async function addReply(postId, parentCommentId) {
+    const content = (replyDrafts[parentCommentId] || "").trim();
+
+    if (!content) {
+      setMessage("Write your reply first.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("comments")
+      .insert({
+        post_id: postId,
+        user_id: session.user.id,
+        content,
+        parent_comment_id: parentCommentId
+      });
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setReplyDrafts(current => ({
+        ...current,
+        [parentCommentId]: ""
+      }));
+
+      setMessage("Reply added successfully!");
+      await loadPosts();
+    }
+
+    setLoading(false);
+  }
+
   async function deleteComment(commentId) {
     const { error } = await supabase
       .from("comments")
@@ -268,6 +300,109 @@ export default function App() {
       setMessage("Comment deleted.");
       await loadPosts();
     }
+  }
+
+  function renderComment(post, comment, depth = 0) {
+    const replies = post.comments.filter(
+      item => item.parent_comment_id === comment.id
+    );
+
+    return (
+      <div
+        key={comment.id}
+        style={{
+          background: "#f5f5f5",
+          padding: 10,
+          borderRadius: 8,
+          margin: "8px 0",
+          marginLeft: depth > 0 ? 18 : 0,
+          borderLeft: depth > 0 ? "3px solid #888" : "none"
+        }}
+      >
+        <strong>
+          {comment.author?.full_name ||
+            comment.author?.username ||
+            "Rays Connect User"}
+        </strong>
+
+        {comment.author?.username && (
+          <small> @{comment.author.username}</small>
+        )}
+
+        <p style={{ whiteSpace: "pre-wrap" }}>{comment.content}</p>
+
+        <small>
+          {new Date(comment.created_at).toLocaleString()}
+        </small>
+
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setReplyDrafts(current => ({
+                ...current,
+                [comment.id]: current[comment.id] || ""
+              }));
+            }}
+          >
+            Reply
+          </button>
+
+          {comment.user_id === session.user.id && (
+            <button
+              type="button"
+              onClick={() => deleteComment(comment.id)}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+
+        {Object.prototype.hasOwnProperty.call(replyDrafts, comment.id) && (
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              addReply(post.id, comment.id);
+            }}
+            style={{ marginTop: 8 }}
+          >
+            <textarea
+              placeholder="Write your reply..."
+              value={replyDrafts[comment.id]}
+              onChange={e =>
+                setReplyDrafts(current => ({
+                  ...current,
+                  [comment.id]: e.target.value
+                }))
+              }
+              maxLength={1000}
+              rows={2}
+            />
+
+            <button type="submit" disabled={loading}>
+              Send Reply
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                setReplyDrafts(current => {
+                  const updated = { ...current };
+                  delete updated[comment.id];
+                  return updated;
+                })
+              }
+            >
+              Cancel
+            </button>
+          </form>
+        )}
+
+        {replies.map(reply =>
+          renderComment(post, reply, depth + 1)
+        )}
+      </div>
+    );
   }
 
   async function handleSubmit(e) {
@@ -639,131 +774,35 @@ export default function App() {
 
         {posts.length === 0 && <p>No posts yet. Be the first to post!</p>}
 
-        {posts.map(post => (
-          <div
-            key={post.id}
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 12,
-              padding: 15,
-              margin: "15px 0",
-              textAlign: "left"
-            }}
-          >
-            <strong>
-              {post.author?.full_name ||
-                post.author?.username ||
-                "Rays Connect User"}
-            </strong>
+        {posts.map(post => {
+          const topLevelComments = post.comments.filter(
+            comment => !comment.parent_comment_id
+          );
 
-            {post.author?.username && <p>@{post.author.username}</p>}
-
-            {post.content && (
-              <p style={{ whiteSpace: "pre-wrap" }}>{post.content}</p>
-            )}
-
-            {post.image_url && (
-              <img
-                src={post.image_url}
-                alt="Post"
-                style={{
-                  width: "100%",
-                  maxHeight: 400,
-                  objectFit: "contain",
-                  borderRadius: 10,
-                  marginTop: 10
-                }}
-              />
-            )}
-
-            <p>
-              <small>{new Date(post.created_at).toLocaleString()}</small>
-            </p>
-
-            <button onClick={() => toggleLike(post)}>
-              {post.likedByMe ? "❤️ Unlike" : "🤍 Like"}
-            </button>
-
-            <p>
-              {post.likesCount} {post.likesCount === 1 ? "Like" : "Likes"}
-            </p>
-
-            <hr />
-
-            <h4>Comments ({post.comments.length})</h4>
-
-            {post.comments.map(comment => (
-              <div
-                key={comment.id}
-                style={{
-                  background: "#f5f5f5",
-                  padding: 10,
-                  borderRadius: 8,
-                  margin: "8px 0"
-                }}
-              >
-                <strong>
-                  {comment.author?.full_name ||
-                    comment.author?.username ||
-                    "Rays Connect User"}
-                </strong>
-
-                {comment.author?.username && (
-                  <small> @{comment.author.username}</small>
-                )}
-
-                <p style={{ whiteSpace: "pre-wrap" }}>{comment.content}</p>
-
-                <small>
-                  {new Date(comment.created_at).toLocaleString()}
-                </small>
-
-                {comment.user_id === session.user.id && (
-                  <div>
-                    <button onClick={() => deleteComment(comment.id)}>
-                      Delete Comment
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                addComment(post.id);
+          return (
+            <div
+              key={post.id}
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 12,
+                padding: 15,
+                margin: "15px 0",
+                textAlign: "left"
               }}
             >
-              <textarea
-                placeholder="Write a comment..."
-                value={commentDrafts[post.id] || ""}
-                onChange={e =>
-                  setCommentDrafts(current => ({
-                    ...current,
-                    [post.id]: e.target.value
-                  }))
-                }
-                maxLength={1000}
-                rows={2}
-              />
+              <strong>
+                {post.author?.full_name ||
+                  post.author?.username ||
+                  "Rays Connect User"}
+              </strong>
 
-              <button type="submit" disabled={loading}>
-                {loading ? "Please wait..." : "Add Comment"}
-              </button>
-            </form>
+              {post.author?.username && <p>@{post.author.username}</p>}
 
-            {post.user_id === session.user.id && (
-              <button onClick={() => deletePost(post.id)}>
-                Delete Post
-              </button>
-            )}
-          </div>
-        ))}
+              {post.content && (
+                <p style={{ whiteSpace: "pre-wrap" }}>{post.content}</p>
+              )}
 
-        <hr />
-        <button onClick={logout}>Sign Out</button>
-      </div>
-    </div>
-  );
-            }
-               
+              {post.image_url && (
+                <img
+                  src={post.image_url}
+      
