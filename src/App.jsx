@@ -5,13 +5,16 @@ import { supabase } from "./supabase.js";
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
+
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -21,21 +24,26 @@ export default function App() {
       setSession(data.session);
     });
 
-    const { data: { subscription } } =
-      supabase.auth.onAuthStateChange((_event, currentSession) => {
-        setSession(currentSession);
-      });
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      setSession(currentSession);
+    });
 
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (session) loadProfile();
-    else setProfile(null);
+    if (session) {
+      loadProfile();
+    } else {
+      setProfile(null);
+    }
   }, [session]);
 
   async function loadProfile() {
     setLoading(true);
+    setMessage("");
 
     const user = session.user;
 
@@ -93,14 +101,18 @@ export default function App() {
           email: email.trim(),
           password,
           options: {
-            data: { username: username.trim() },
+            data: {
+              username: username.trim()
+            },
             emailRedirectTo: window.location.origin
           }
         });
 
         if (error) throw error;
 
-        setMessage("Account created! Check your email to confirm your account.");
+        setMessage(
+          "Account created! Check your email to confirm your account."
+        );
         setMode("login");
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -117,6 +129,54 @@ export default function App() {
     }
   }
 
+  async function uploadAvatar(e) {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setMessage("Please choose an image file.");
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage("Please choose an image smaller than 5 MB.");
+      e.target.value = "";
+      return;
+    }
+
+    setLoading(true);
+    setMessage("Uploading your photo...");
+
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const filePath =
+        `${session.user.id}/${Date.now()}-${safeName}`;
+
+      const { data, error } = await supabase.storage
+        .from("profile-photos")
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false
+        });
+
+      if (error) throw error;
+
+      const { data: publicData } = supabase.storage
+        .from("profile-photos")
+        .getPublicUrl(data.path);
+
+      setAvatarUrl(publicData.publicUrl);
+      setMessage("Photo uploaded! Tap Save Profile to finish.");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
+      e.target.value = "";
+    }
+  }
+
   async function saveProfile(e) {
     e.preventDefault();
     setLoading(true);
@@ -128,7 +188,7 @@ export default function App() {
         username: username.trim(),
         full_name: fullName.trim(),
         bio: bio.trim(),
-      <input: avatarUrl.trim()
+        avatar_url: avatarUrl
       })
       .eq("id", session.user.id)
       .select()
@@ -146,7 +206,11 @@ export default function App() {
   }
 
   async function logout() {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setMessage(error.message);
+    }
   }
 
   if (session) {
@@ -156,35 +220,64 @@ export default function App() {
           <h1>Rays<span>Connect</span></h1>
           <h2>My Profile</h2>
 
-          {loading && <p>Loading profile...</p>}
+          {loading && <p>Please wait...</p>}
 
           {profile && !editing && (
             <>
-              {profile.avatar_url && (
+              {profile.avatar_url ? (
                 <img
                   src={profile.avatar_url}
                   alt="Profile"
                   style={{
-                    width: 100,
-                    height: 100,
+                    width: 120,
+                    height: 120,
                     borderRadius: "50%",
                     objectFit: "cover"
                   }}
                 />
+              ) : (
+                <p>No profile photo yet.</p>
               )}
 
               <h2>{profile.full_name || profile.username}</h2>
               <p>@{profile.username}</p>
               <p>{profile.bio || "No bio added yet."}</p>
               <p>{session.user.email}</p>
+
               <button onClick={() => setEditing(true)}>
-                Edit profile
+                Edit Profile
               </button>
             </>
           )}
 
           {editing && (
             <form onSubmit={saveProfile}>
+              <h3>Update your profile</h3>
+
+              {avatarUrl && (
+                <img
+                  src={avatarUrl}
+                  alt="Profile preview"
+                  style={{
+                    width: 120,
+                    height: 120,
+                    borderRadius: "50%",
+                    objectFit: "cover"
+                  }}
+                />
+              )}
+
+              <label>
+                Choose profile photo
+              </label>
+
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadAvatar}
+                disabled={loading}
+              />
+
               <input
                 placeholder="Username"
                 value={username}
@@ -205,19 +298,17 @@ export default function App() {
                 onChange={e => setBio(e.target.value)}
               />
 
-              <input
-                placeholder="Profile picture URL"
-                value={avatarUrl}
-                onChange={e => setAvatarUrl(e.target.value)}
-              />
-
-              <button disabled={loading}>
-                {loading ? "Saving..." : "Save profile"}
+              <button type="submit" disabled={loading}>
+                {loading ? "Please wait..." : "Save Profile"}
               </button>
 
               <button
                 type="button"
-                onClick={() => setEditing(false)}
+                disabled={loading}
+                onClick={() => {
+                  setEditing(false);
+                  setMessage("");
+                }}
               >
                 Cancel
               </button>
@@ -226,7 +317,9 @@ export default function App() {
 
           {message && <p>{message}</p>}
 
-          <button onClick={logout}>Sign out</button>
+          <button onClick={logout}>
+            Sign Out
+          </button>
         </div>
       </div>
     );
@@ -238,7 +331,9 @@ export default function App() {
         <h1>Rays<span>Connect</span></h1>
         <p>Your moments. Your people.</p>
 
-        <h2>{mode === "signup" ? "Create account" : "Welcome back"}</h2>
+        <h2>
+          {mode === "signup" ? "Create Account" : "Welcome Back"}
+        </h2>
 
         <form onSubmit={handleSubmit}>
           {mode === "signup" && (
@@ -269,8 +364,11 @@ export default function App() {
           />
 
           <button type="submit" disabled={loading}>
-            {loading ? "Please wait..." :
-              mode === "signup" ? "Create account" : "Sign in"}
+            {loading
+              ? "Please wait..."
+              : mode === "signup"
+                ? "Create Account"
+                : "Sign In"}
           </button>
         </form>
 
@@ -281,6 +379,7 @@ export default function App() {
             ? "Already have an account?"
             : "New to Rays Connect?"}
           {" "}
+
           <button
             type="button"
             onClick={() => {
@@ -288,11 +387,10 @@ export default function App() {
               setMessage("");
             }}
           >
-            {mode === "signup" ? "Sign in" : "Register"}
+            {mode === "signup" ? "Sign In" : "Register"}
           </button>
         </p>
       </div>
     </div>
   );
-          }
-          
+            }
