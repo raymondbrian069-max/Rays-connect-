@@ -8,6 +8,8 @@ export default function App() {
   const [posts, setPosts] = useState([]);
   const [commentDrafts, setCommentDrafts] = useState({});
   const [replyDrafts, setReplyDrafts] = useState({});
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -42,9 +44,12 @@ export default function App() {
     if (session) {
       loadProfile();
       loadPosts();
+      loadNotifications();
     } else {
       setProfile(null);
       setPosts([]);
+      setNotifications([]);
+      setShowNotifications(false);
     }
   }, [session]);
 
@@ -172,6 +177,92 @@ export default function App() {
         };
       })
     );
+  }
+
+  async function loadNotifications() {
+    if (!session) return;
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("recipient_id", session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    const items = data || [];
+    const actorIds = [
+      ...new Set(items.map(item => item.actor_id).filter(Boolean))
+    ];
+
+    let actorProfiles = [];
+
+    if (actorIds.length > 0) {
+      const { data: profileData, error: profileError } = await supabase
+        .from("user_profiles")
+        .select("id, username, full_name")
+        .in("id", actorIds);
+
+      if (profileError) {
+        setMessage(profileError.message);
+        return;
+      }
+
+      actorProfiles = profileData || [];
+    }
+
+    setNotifications(
+      items.map(item => ({
+        ...item,
+        actor: actorProfiles.find(person => person.id === item.actor_id)
+      }))
+    );
+  }
+
+  async function markNotificationRead(notificationId) {
+    const { error } = await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("id", notificationId)
+      .eq("recipient_id", session.user.id);
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setNotifications(current =>
+        current.map(item =>
+          item.id === notificationId
+            ? { ...item, is_read: true }
+            : item
+        )
+      );
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    const unreadIds = notifications
+      .filter(item => !item.is_read)
+      .map(item => item.id);
+
+    if (unreadIds.length === 0) return;
+
+    const { error } = await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .in("id", unreadIds)
+      .eq("recipient_id", session.user.id);
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setNotifications(current =>
+        current.map(item => ({ ...item, is_read: true }))
+      );
+    }
   }
 
   async function toggleLike(post) {
@@ -639,6 +730,8 @@ export default function App() {
     );
   }
 
+  const unreadCount = notifications.filter(item => !item.is_read).length;
+
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -647,162 +740,78 @@ export default function App() {
 
         {message && <p>{message}</p>}
 
-        <h2>My Profile</h2>
-
-        {profile && !editing && (
-          <>
-            {profile.avatar_url && (
-              <img
-                src={profile.avatar_url}
-                alt="Profile"
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: "50%",
-                  objectFit: "cover"
-                }}
-              />
-            )}
-
-            <h3>{profile.full_name || profile.username}</h3>
-            <p>@{profile.username}</p>
-            <p>{profile.bio || "No bio added yet."}</p>
-            <button onClick={() => setEditing(true)}>Edit Profile</button>
-          </>
-        )}
-
-        {editing && (
-          <form onSubmit={saveProfile}>
-            <h3>Update your profile</h3>
-
-            {avatarUrl && (
-              <img
-                src={avatarUrl}
-                alt="Profile preview"
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: "50%",
-                  objectFit: "cover"
-                }}
-              />
-            )}
-
-            <label>Choose profile photo</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={uploadAvatar}
-              disabled={loading}
-            />
-
-            <input
-              placeholder="Username"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              required
-              minLength={3}
-            />
-
-            <input
-              placeholder="Full name"
-              value={fullName}
-              onChange={e => setFullName(e.target.value)}
-            />
-
-            <textarea
-              placeholder="Write your bio"
-              value={bio}
-              onChange={e => setBio(e.target.value)}
-            />
-
-            <button type="submit" disabled={loading}>Save Profile</button>
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              disabled={loading}
-            >
-              Cancel
-            </button>
-          </form>
-        )}
-
-        <hr />
-
-        <h2>Home Feed</h2>
-
-        <form onSubmit={createPost}>
-          <textarea
-            placeholder="What's happening?"
-            value={postContent}
-            onChange={e => setPostContent(e.target.value)}
-            maxLength={2000}
-            rows={4}
-          />
-
-          <label>Attach a photo</label>
-
-          <input
-            type="file"
-            accept="image/*"
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-
-              if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
-                setMessage("Choose an image smaller than 5 MB.");
-                e.target.value = "";
-                return;
-              }
-
-              setPostImage(file);
-              setMessage("Photo selected. Ready to publish.");
+        <div style={{ margin: "12px 0" }}>
+          <button
+            type="button"
+            onClick={() => {
+              setShowNotifications(current => !current);
+              loadNotifications();
             }}
-            disabled={loading}
-          />
-
-          {postImage && <p>Selected photo: {postImage.name}</p>}
-
-          <button type="submit" disabled={loading}>
-            {loading ? "Please wait..." : "Publish Post"}
+          >
+            🔔 Notifications ({unreadCount})
           </button>
-        </form>
 
-        <button onClick={loadPosts}>Refresh Feed</button>
+          <button
+            type="button"
+            onClick={loadNotifications}
+          >
+            Refresh Notifications
+          </button>
+        </div>
 
-        <h3>Latest Posts</h3>
+        {showNotifications && (
+          <section
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 10,
+              padding: 12,
+              marginBottom: 16,
+              textAlign: "left"
+            }}
+          >
+            <h3>Your Notifications</h3>
 
-        {posts.length === 0 && <p>No posts yet. Be the first to post!</p>}
+            {notifications.length === 0 && (
+              <p>No notifications yet.</p>
+            )}
 
-        {posts.map(post => {
-          const topLevelComments = post.comments.filter(
-            comment => !comment.parent_comment_id
-          );
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={markAllNotificationsRead}
+              >
+                Mark All as Read
+              </button>
+            )}
 
-          return (
-            <div
-              key={post.id}
-              style={{
-                border: "1px solid #ddd",
-                borderRadius: 12,
-                padding: 15,
-                margin: "15px 0",
-                textAlign: "left"
-              }}
-            >
-              <strong>
-                {post.author?.full_name ||
-                  post.author?.username ||
-                  "Rays Connect User"}
-              </strong>
+            {notifications.map(item => (
+              <div
+                key={item.id}
+                style={{
+                  padding: 10,
+                  borderBottom: "1px solid #eee",
+                  background: item.is_read ? "#fff" : "#eef5ff"
+                }}
+              >
+                <strong>
+                  {item.actor?.full_name ||
+                    item.actor?.username ||
+                    "A user"}
+                </strong>{" "}
+                {item.message}
 
-              {post.author?.username && <p>@{post.author.username}</p>}
+                <br />
 
-              {post.content && (
-                <p style={{ whiteSpace: "pre-wrap" }}>{post.content}</p>
-              )}
+                <small>
+                  {new Date(item.created_at).toLocaleString()}
+                </small>
 
-              {post.image_url && (
-                <img
-                  src={post.image_url}
-      
+                {!item.is_read && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => markNotificationRead(item.id)}
+                    >
+                      Mark as Read
+                    </button>
+         
