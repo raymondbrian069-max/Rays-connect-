@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build"
   },
-  "dependencies": {
+  "dependencies":"@supabase/supabase-js": "latest", {
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",
