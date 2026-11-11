@@ -117,12 +117,77 @@ export default function App() {
       profiles = profileData || [];
     }
 
+    const { data: likesData, error: likesError } = await supabase
+      .from("likes")
+      .select("post_id, user_id");
+
+    if (likesError) {
+      setMessage(likesError.message);
+      return;
+    }
+
+    const allLikes = likesData || [];
+
     setPosts(
-      data.map(post => ({
-        ...post,
-        author: profiles.find(p => p.id === post.user_id)
-      }))
+      data.map(post => {
+        const postLikes = allLikes.filter(
+          like => like.post_id === post.id
+        );
+
+        return {
+          ...post,
+          author: profiles.find(p => p.id === post.user_id),
+          likesCount: postLikes.length,
+          likedByMe: postLikes.some(
+            like => like.user_id === session.user.id
+          )
+        };
+      })
     );
+  }
+
+  async function toggleLike(post) {
+    const previousPosts = posts;
+
+    setPosts(current =>
+      current.map(item =>
+        item.id === post.id
+          ? {
+              ...item,
+              likedByMe: !item.likedByMe,
+              likesCount: item.likesCount + (item.likedByMe ? -1 : 1)
+            }
+          : item
+      )
+    );
+
+    let error;
+
+    if (post.likedByMe) {
+      const result = await supabase
+        .from("likes")
+        .delete()
+        .eq("post_id", post.id)
+        .eq("user_id", session.user.id);
+
+      error = result.error;
+    } else {
+      const result = await supabase
+        .from("likes")
+        .insert({
+          post_id: post.id,
+          user_id: session.user.id
+        });
+
+      error = result.error;
+    }
+
+    if (error) {
+      setPosts(previousPosts);
+      setMessage(error.message);
+    } else {
+      await loadPosts();
+    }
   }
 
   async function handleSubmit(e) {
@@ -303,6 +368,7 @@ export default function App() {
         <div className="auth-card">
           <h1>Rays<span>Connect</span></h1>
           <p>Your moments. Your people.</p>
+
           <h2>{mode === "signup" ? "Create Account" : "Welcome Back"}</h2>
 
           <form onSubmit={handleSubmit}>
@@ -374,9 +440,15 @@ export default function App() {
               <img
                 src={profile.avatar_url}
                 alt="Profile"
-                style={{ width: 100, height: 100, borderRadius: "50%", objectFit: "cover" }}
+                style={{
+                  width: 100,
+                  height: 100,
+                  borderRadius: "50%",
+                  objectFit: "cover"
+                }}
               />
             )}
+
             <h3>{profile.full_name || profile.username}</h3>
             <p>@{profile.username}</p>
             <p>{profile.bio || "No bio added yet."}</p>
@@ -392,12 +464,22 @@ export default function App() {
               <img
                 src={avatarUrl}
                 alt="Profile preview"
-                style={{ width: 100, height: 100, borderRadius: "50%", objectFit: "cover" }}
+                style={{
+                  width: 100,
+                  height: 100,
+                  borderRadius: "50%",
+                  objectFit: "cover"
+                }}
               />
             )}
 
             <label>Choose profile photo</label>
-            <input type="file" accept="image/*" onChange={uploadAvatar} disabled={loading} />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={uploadAvatar}
+              disabled={loading}
+            />
 
             <input
               placeholder="Username"
@@ -420,7 +502,13 @@ export default function App() {
             />
 
             <button type="submit" disabled={loading}>Save Profile</button>
-            <button type="button" onClick={() => setEditing(false)} disabled={loading}>Cancel</button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              disabled={loading}
+            >
+              Cancel
+            </button>
           </form>
         )}
 
@@ -438,12 +526,12 @@ export default function App() {
           />
 
           <label>Attach a photo</label>
+
           <input
             type="file"
             accept="image/*"
             onChange={e => {
               const file = e.target.files?.[0];
-
               if (!file) return;
 
               if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
@@ -458,9 +546,7 @@ export default function App() {
             disabled={loading}
           />
 
-          {postImage && (
-            <p>Selected photo: {postImage.name}</p>
-          )}
+          {postImage && <p>Selected photo: {postImage.name}</p>}
 
           <button type="submit" disabled={loading}>
             {loading ? "Please wait..." : "Publish Post"}
@@ -485,7 +571,9 @@ export default function App() {
             }}
           >
             <strong>
-              {post.author?.full_name || post.author?.username || "Rays Connect User"}
+              {post.author?.full_name ||
+                post.author?.username ||
+                "Rays Connect User"}
             </strong>
 
             {post.author?.username && <p>@{post.author.username}</p>}
@@ -512,6 +600,14 @@ export default function App() {
               <small>{new Date(post.created_at).toLocaleString()}</small>
             </p>
 
+            <button onClick={() => toggleLike(post)}>
+              {post.likedByMe ? "❤️ Unlike" : "🤍 Like"}
+            </button>
+
+            <p>
+              {post.likesCount} {post.likesCount === 1 ? "Like" : "Likes"}
+            </p>
+
             {post.user_id === session.user.id && (
               <button onClick={() => deletePost(post.id)}>
                 Delete Post
@@ -525,5 +621,5 @@ export default function App() {
       </div>
     </div>
   );
-            }
+           }
         
