@@ -8,7 +8,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
+    "@vitejs/plug"@supabase/supabase-js": "latest",in-react": "latest",
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
