@@ -151,6 +151,86 @@ main h2 {
   .menu {
     padding: 12px 2px;
   }
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  background: #0b1020;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 30px 24px;
+  background: #151d30;
+  border: 1px solid #303c56;
+  border-radius: 18px;
+  text-align: center;
+}
+
+.auth-card h1 {
+  font-size: 30px;
+  margin-bottom: 10px;
+}
+
+.auth-card h1 span {
+  color: #a78bfa;
+  margin-left: 5px;
+}
+
+.auth-card h2 {
+  margin: 28px 0 12px;
+}
+
+.auth-card p {
+  color: #cbd5e1;
+  margin-bottom: 18px;
+}
+
+.auth-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #394663;
+  border-radius: 9px;
+  background: #0b1020;
+  color: white;
+  font-size: 15px;
+}
+
+.auth-card button {
+  padding: 13px;
+  border: none;
+  border-radius: 9px;
+  background: #8b5cf6;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.auth-card button:disabled {
+  opacity: 0.6;
+}
+
+.auth-card form button {
+  margin-top: 5px;
+}
+
+.auth-card > button {
+  margin-top: 15px;
+}
+
+.auth-card button:hover {
+  background: #7c3aed;
+}
+  
 
   .menu button {
     font-size: 10px;
