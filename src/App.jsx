@@ -6,6 +6,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [commentDrafts, setCommentDrafts] = useState({});
 
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -100,7 +101,33 @@ export default function App() {
       return;
     }
 
-    const userIds = [...new Set(data.map(post => post.user_id))];
+    const { data: likesData, error: likesError } = await supabase
+      .from("likes")
+      .select("post_id, user_id");
+
+    if (likesError) {
+      setMessage(likesError.message);
+      return;
+    }
+
+    const { data: commentsData, error: commentsError } = await supabase
+      .from("comments")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (commentsError) {
+      setMessage(commentsError.message);
+      return;
+    }
+
+    const allComments = commentsData || [];
+    const userIds = [
+      ...new Set([
+        ...data.map(post => post.user_id),
+        ...allComments.map(comment => comment.user_id)
+      ])
+    ];
+
     let profiles = [];
 
     if (userIds.length > 0) {
@@ -117,15 +144,6 @@ export default function App() {
       profiles = profileData || [];
     }
 
-    const { data: likesData, error: likesError } = await supabase
-      .from("likes")
-      .select("post_id, user_id");
-
-    if (likesError) {
-      setMessage(likesError.message);
-      return;
-    }
-
     const allLikes = likesData || [];
 
     setPosts(
@@ -134,13 +152,21 @@ export default function App() {
           like => like.post_id === post.id
         );
 
+        const postComments = allComments
+          .filter(comment => comment.post_id === post.id)
+          .map(comment => ({
+            ...comment,
+            author: profiles.find(p => p.id === comment.user_id)
+          }));
+
         return {
           ...post,
           author: profiles.find(p => p.id === post.user_id),
           likesCount: postLikes.length,
           likedByMe: postLikes.some(
             like => like.user_id === session.user.id
-          )
+          ),
+          comments: postComments
         };
       })
     );
@@ -186,6 +212,60 @@ export default function App() {
       setPosts(previousPosts);
       setMessage(error.message);
     } else {
+      await loadPosts();
+    }
+  }
+
+  async function addComment(postId) {
+    const content = (commentDrafts[postId] || "").trim();
+
+    if (!content) {
+      setMessage("Write a comment first.");
+      return;
+    }
+
+    if (content.length > 1000) {
+      setMessage("Your comment must be 1000 characters or fewer.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("comments")
+      .insert({
+        post_id: postId,
+        user_id: session.user.id,
+        content
+      });
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setCommentDrafts(current => ({
+        ...current,
+        [postId]: ""
+      }));
+
+      setMessage("Comment added successfully!");
+      await loadPosts();
+    }
+
+    setLoading(false);
+  }
+
+  async function deleteComment(commentId) {
+    const { error } = await supabase
+      .from("comments")
+      .delete()
+      .eq("id", commentId)
+      .eq("user_id", session.user.id);
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      setMessage("Comment deleted.");
       await loadPosts();
     }
   }
@@ -608,6 +688,70 @@ export default function App() {
               {post.likesCount} {post.likesCount === 1 ? "Like" : "Likes"}
             </p>
 
+            <hr />
+
+            <h4>Comments ({post.comments.length})</h4>
+
+            {post.comments.map(comment => (
+              <div
+                key={comment.id}
+                style={{
+                  background: "#f5f5f5",
+                  padding: 10,
+                  borderRadius: 8,
+                  margin: "8px 0"
+                }}
+              >
+                <strong>
+                  {comment.author?.full_name ||
+                    comment.author?.username ||
+                    "Rays Connect User"}
+                </strong>
+
+                {comment.author?.username && (
+                  <small> @{comment.author.username}</small>
+                )}
+
+                <p style={{ whiteSpace: "pre-wrap" }}>{comment.content}</p>
+
+                <small>
+                  {new Date(comment.created_at).toLocaleString()}
+                </small>
+
+                {comment.user_id === session.user.id && (
+                  <div>
+                    <button onClick={() => deleteComment(comment.id)}>
+                      Delete Comment
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                addComment(post.id);
+              }}
+            >
+              <textarea
+                placeholder="Write a comment..."
+                value={commentDrafts[post.id] || ""}
+                onChange={e =>
+                  setCommentDrafts(current => ({
+                    ...current,
+                    [post.id]: e.target.value
+                  }))
+                }
+                maxLength={1000}
+                rows={2}
+              />
+
+              <button type="submit" disabled={loading}>
+                {loading ? "Please wait..." : "Add Comment"}
+              </button>
+            </form>
+
             {post.user_id === session.user.id && (
               <button onClick={() => deletePost(post.id)}>
                 Delete Post
@@ -621,5 +765,5 @@ export default function App() {
       </div>
     </div>
   );
-           }
-        
+            }
+               
