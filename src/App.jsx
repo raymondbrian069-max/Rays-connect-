@@ -17,6 +17,7 @@ export default function App() {
   const [avatarUrl, setAvatarUrl] = useState("");
 
   const [postContent, setPostContent] = useState("");
+  const [postImage, setPostImage] = useState(null);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -100,7 +101,6 @@ export default function App() {
     }
 
     const userIds = [...new Set(data.map(post => post.user_id))];
-
     let profiles = [];
 
     if (userIds.length > 0) {
@@ -117,12 +117,12 @@ export default function App() {
       profiles = profileData || [];
     }
 
-    const combinedPosts = data.map(post => ({
-      ...post,
-      author: profiles.find(p => p.id === post.user_id)
-    }));
-
-    setPosts(combinedPosts);
+    setPosts(
+      data.map(post => ({
+        ...post,
+        author: profiles.find(p => p.id === post.user_id)
+      }))
+    );
   }
 
   async function handleSubmit(e) {
@@ -164,22 +164,17 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith("image/")) {
-      setMessage("Please choose an image file.");
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      setMessage("Please choose an image smaller than 5 MB.");
+    if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+      setMessage("Choose an image smaller than 5 MB.");
+      e.target.value = "";
       return;
     }
 
     setLoading(true);
-    setMessage("Uploading photo...");
 
     try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const filePath = `${session.user.id}/${Date.now()}-${safeName}`;
+      const filePath =
+        `${session.user.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
 
       const { data, error } = await supabase.storage
         .from("profile-photos")
@@ -233,30 +228,53 @@ export default function App() {
   async function createPost(e) {
     e.preventDefault();
 
-    if (!postContent.trim()) {
-      setMessage("Write something before posting.");
+    if (!postContent.trim() && !postImage) {
+      setMessage("Write something or choose a photo.");
       return;
     }
 
     setLoading(true);
-    setMessage("");
+    setMessage("Publishing your post...");
 
-    const { error } = await supabase
-      .from("posts")
-      .insert({
-        user_id: session.user.id,
-        content: postContent.trim()
-      });
+    try {
+      let imageUrl = null;
 
-    if (error) {
-      setMessage(error.message);
-    } else {
+      if (postImage) {
+        const filePath =
+          `posts/${session.user.id}/${Date.now()}-${postImage.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+
+        const { data, error } = await supabase.storage
+          .from("profile-photos")
+          .upload(filePath, postImage);
+
+        if (error) throw error;
+
+        const { data: publicData } = supabase.storage
+          .from("profile-photos")
+          .getPublicUrl(data.path);
+
+        imageUrl = publicData.publicUrl;
+      }
+
+      const { error } = await supabase
+        .from("posts")
+        .insert({
+          user_id: session.user.id,
+          content: postContent.trim(),
+          image_url: imageUrl
+        });
+
+      if (error) throw error;
+
       setPostContent("");
+      setPostImage(null);
       setMessage("Your post has been published!");
       await loadPosts();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   async function deletePost(postId) {
@@ -276,7 +294,6 @@ export default function App() {
 
   async function logout() {
     const { error } = await supabase.auth.signOut();
-
     if (error) setMessage(error.message);
   }
 
@@ -286,10 +303,7 @@ export default function App() {
         <div className="auth-card">
           <h1>Rays<span>Connect</span></h1>
           <p>Your moments. Your people.</p>
-
-          <h2>
-            {mode === "signup" ? "Create Account" : "Welcome Back"}
-          </h2>
+          <h2>{mode === "signup" ? "Create Account" : "Welcome Back"}</h2>
 
           <form onSubmit={handleSubmit}>
             {mode === "signup" && (
@@ -320,20 +334,14 @@ export default function App() {
             />
 
             <button type="submit" disabled={loading}>
-              {loading
-                ? "Please wait..."
-                : mode === "signup"
-                  ? "Create Account"
-                  : "Sign In"}
+              {loading ? "Please wait..." : mode === "signup" ? "Create Account" : "Sign In"}
             </button>
           </form>
 
           {message && <p>{message}</p>}
 
           <p>
-            {mode === "signup"
-              ? "Already have an account?"
-              : "New to Rays Connect?"}
+            {mode === "signup" ? "Already have an account?" : "New to Rays Connect?"}
             {" "}
             <button
               type="button"
@@ -366,22 +374,13 @@ export default function App() {
               <img
                 src={profile.avatar_url}
                 alt="Profile"
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: "50%",
-                  objectFit: "cover"
-                }}
+                style={{ width: 100, height: 100, borderRadius: "50%", objectFit: "cover" }}
               />
             )}
-
             <h3>{profile.full_name || profile.username}</h3>
             <p>@{profile.username}</p>
             <p>{profile.bio || "No bio added yet."}</p>
-
-            <button onClick={() => setEditing(true)}>
-              Edit Profile
-            </button>
+            <button onClick={() => setEditing(true)}>Edit Profile</button>
           </>
         )}
 
@@ -393,22 +392,12 @@ export default function App() {
               <img
                 src={avatarUrl}
                 alt="Profile preview"
-                style={{
-                  width: 100,
-                  height: 100,
-                  borderRadius: "50%",
-                  objectFit: "cover"
-                }}
+                style={{ width: 100, height: 100, borderRadius: "50%", objectFit: "cover" }}
               />
             )}
 
             <label>Choose profile photo</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={uploadAvatar}
-              disabled={loading}
-            />
+            <input type="file" accept="image/*" onChange={uploadAvatar} disabled={loading} />
 
             <input
               placeholder="Username"
@@ -430,17 +419,8 @@ export default function App() {
               onChange={e => setBio(e.target.value)}
             />
 
-            <button type="submit" disabled={loading}>
-              Save Profile
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              disabled={loading}
-            >
-              Cancel
-            </button>
+            <button type="submit" disabled={loading}>Save Profile</button>
+            <button type="button" onClick={() => setEditing(false)} disabled={loading}>Cancel</button>
           </form>
         )}
 
@@ -457,14 +437,37 @@ export default function App() {
             rows={4}
           />
 
+          <label>Attach a photo</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={e => {
+              const file = e.target.files?.[0];
+
+              if (!file) return;
+
+              if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+                setMessage("Choose an image smaller than 5 MB.");
+                e.target.value = "";
+                return;
+              }
+
+              setPostImage(file);
+              setMessage("Photo selected. Ready to publish.");
+            }}
+            disabled={loading}
+          />
+
+          {postImage && (
+            <p>Selected photo: {postImage.name}</p>
+          )}
+
           <button type="submit" disabled={loading}>
             {loading ? "Please wait..." : "Publish Post"}
           </button>
         </form>
 
-        <button onClick={loadPosts}>
-          Refresh Feed
-        </button>
+        <button onClick={loadPosts}>Refresh Feed</button>
 
         <h3>Latest Posts</h3>
 
@@ -482,39 +485,45 @@ export default function App() {
             }}
           >
             <strong>
-              {post.author?.full_name ||
-                post.author?.username ||
-                "Rays Connect User"}
+              {post.author?.full_name || post.author?.username || "Rays Connect User"}
             </strong>
 
-            {post.author?.username && (
-              <p>@{post.author.username}</p>
+            {post.author?.username && <p>@{post.author.username}</p>}
+
+            {post.content && (
+              <p style={{ whiteSpace: "pre-wrap" }}>{post.content}</p>
             )}
 
-            <p style={{ whiteSpace: "pre-wrap" }}>
-              {post.content}
+            {post.image_url && (
+              <img
+                src={post.image_url}
+                alt="Post"
+                style={{
+                  width: "100%",
+                  maxHeight: 400,
+                  objectFit: "contain",
+                  borderRadius: 10,
+                  marginTop: 10
+                }}
+              />
+            )}
+
+            <p>
+              <small>{new Date(post.created_at).toLocaleString()}</small>
             </p>
 
-            <small>
-              {new Date(post.created_at).toLocaleString()}
-            </small>
-
             {post.user_id === session.user.id && (
-              <div>
-                <button onClick={() => deletePost(post.id)}>
-                  Delete Post
-                </button>
-              </div>
+              <button onClick={() => deletePost(post.id)}>
+                Delete Post
+              </button>
             )}
           </div>
         ))}
 
         <hr />
-
-        <button onClick={logout}>
-          Sign Out
-        </button>
+        <button onClick={logout}>Sign Out</button>
       </div>
     </div>
   );
-          }
+            }
+        
