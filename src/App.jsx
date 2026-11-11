@@ -128,7 +128,7 @@ export default function App() {
         username: username.trim(),
         full_name: fullName.trim(),
         bio: bio.trim(),
-        avatar_url: avatarUrl.trim()
+      <input: avatarUrl.trim()
       })
       .eq("id", session.user.id)
       .select()
