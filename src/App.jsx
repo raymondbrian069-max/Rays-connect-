@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabase.js";
 
 const BUCKET = "profile-photos";
@@ -35,6 +35,11 @@ export default function App() {
   const [peopleSearch,setPeopleSearch] = useState("");
   const [people,setPeople] = useState([]);
   const [showNewMessage,setShowNewMessage] = useState(false);
+  const [isRecording,setIsRecording] = useState(false);
+  const [mediaBusy,setMediaBusy] = useState(false);
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const recordStartedRef = useRef(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({data}) => setSession(data.session));
@@ -102,7 +107,12 @@ export default function App() {
     if(!session?.user||!conversationId)return;
     const {data,error}=await supabase.from("messages").select("*").eq("conversation_id",conversationId).order("created_at",{ascending:true}).limit(300);
     if(error){setMessage(error.message);return;}
-    setMessages(data||[]);
+    const hydrated=await Promise.all((data||[]).map(async msg=>{
+      if(!msg.media_path)return msg;
+      const {data:signed,error:signedError}=await supabase.storage.from("message-media").createSignedUrl(msg.media_path,3600);
+      return {...msg,mediaUrl:signedError?null:signed?.signedUrl};
+    }));
+    setMessages(hydrated);
     await supabase.from("messages").update({read_at:new Date().toISOString()}).eq("conversation_id",conversationId).neq("sender_id",session.user.id).is("read_at",null);
     loadInbox();
   },[session,loadInbox]);
@@ -135,6 +145,55 @@ export default function App() {
     const {error}=await supabase.from("messages").insert({conversation_id:activeConversation.id,sender_id:session.user.id,content});
     if(error)setMessage(error.message);else{setMessageDraft("");await loadMessages(activeConversation.id);}
     setLoading(false);
+  }
+
+  async function sendChatMedia(file,kind,duration=null){
+    if(!file||!activeConversation)return;
+    const image=kind==="image";
+    const limit=image?5*1024*1024:10*1024*1024;
+    if(file.size>limit){setMessage(image?"Choose an image smaller than 5 MB.":"Voice message must be under 10 MB.");return;}
+    const allowed=image?file.type.startsWith("image/"):/^audio\\/(webm|mp4|mpeg|ogg)$/.test(file.type);
+    if(!allowed){setMessage(image?"Choose a valid image file.":"This browser's audio format is not supported.");return;}
+    setMediaBusy(true);setMessage("");
+    try{
+      const clean=(file.name||("voice-message."+((file.type.split("/")[1]||"webm").replace("mpeg","mp3")))).replace(/[^a-zA-Z0-9._-]/g,"_");
+      const path=activeConversation.id+"/"+session.user.id+"/"+Date.now()+"-"+clean;
+      const {error:uploadError}=await supabase.storage.from("message-media").upload(path,file,{upsert:false,contentType:file.type});
+      if(uploadError)throw uploadError;
+      const {error:insertError}=await supabase.from("messages").insert({
+        conversation_id:activeConversation.id,sender_id:session.user.id,content:null,
+        media_path:path,media_type:kind,media_name:clean,duration_seconds:duration
+      });
+      if(insertError)throw insertError;
+      await loadMessages(activeConversation.id);await loadInbox();
+    }catch(err){setMessage(err.message||"Could not send this attachment.");}
+    finally{setMediaBusy(false);}
+  }
+
+  async function startVoiceRecording(){
+    if(!activeConversation||!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){setMessage("Voice recording is not supported in this browser.");return;}
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const candidates=["audio/webm;codecs=opus","audio/webm","audio/mp4"];
+      const mimeType=candidates.find(type=>MediaRecorder.isTypeSupported(type));
+      const recorder=mimeType?new MediaRecorder(stream,{mimeType}):new MediaRecorder(stream);
+      chunksRef.current=[];recordStartedRef.current=Date.now();recorderRef.current=recorder;
+      recorder.ondataavailable=event=>{if(event.data.size)chunksRef.current.push(event.data);};
+      recorder.onstop=async()=>{
+        stream.getTracks().forEach(track=>track.stop());
+        const duration=Math.max(1,Math.round((Date.now()-recordStartedRef.current)/1000));
+        const blob=new Blob(chunksRef.current,{type:recorder.mimeType||"audio/webm"});
+        const ext=(blob.type.split("/")[1]||"webm").split(";")[0].replace("mpeg","mp3");
+        const file=new File([blob],"voice-message."+ext,{type:blob.type});
+        if(duration>120){setMessage("Voice messages are limited to 2 minutes.");return;}
+        await sendChatMedia(file,"audio",duration);
+      };
+      recorder.start();setIsRecording(true);
+    }catch(err){setMessage(err.name==="NotAllowedError"?"Allow microphone access to record a voice message.":err.message||"Could not start recording.");}
+  }
+
+  function stopVoiceRecording(){
+    if(recorderRef.current&&recorderRef.current.state!=="inactive"){recorderRef.current.stop();setIsRecording(false);}
   }
 
   const loadNotifications = useCallback(async () => {
@@ -294,8 +353,9 @@ export default function App() {
         </aside>
         <section className="panel chat-panel">
           {activeConversation?<><div className="chat-heading"><button className="back-inbox" onClick={()=>setActiveConversation(null)}>‹</button><div className="avatar">{activeConversation.person?.avatar_url?<img src={activeConversation.person.avatar_url} alt=""/>:initials(activeConversation.person)}</div><div><b>{displayName(activeConversation.person)}</b><small>@{activeConversation.person?.username||"member"}</small></div></div>
-            <div className="message-list">{messages.map(msg=><div key={msg.id} className={"message-bubble "+(msg.sender_id===session.user.id?"mine":"theirs")}><p>{msg.content}</p><small>{dateText(msg.created_at)}</small></div>)}</div>
+            <div className="message-list">{messages.map(msg=><div key={msg.id} className={"message-bubble "+(msg.sender_id===session.user.id?"mine":"theirs")}>{msg.media_type==="image"&&msg.mediaUrl&&<a href={msg.mediaUrl} target="_blank" rel="noreferrer"><img className="chat-image" src={msg.mediaUrl} alt={msg.media_name||"Shared image"} loading="lazy"/></a>}{msg.media_type==="audio"&&msg.mediaUrl&&<audio className="chat-audio" controls preload="none" src={msg.mediaUrl}>Audio playback is not supported.</audio>}{msg.content&&<p>{msg.content}</p>}<small>{msg.media_type==="image"?"Photo · ":""}{msg.media_type==="audio"?"Voice message · ":""}{dateText(msg.created_at)}</small></div>)}</div>
             <form className="send-message-form" onSubmit={sendMessage}><input value={messageDraft} onChange={e=>setMessageDraft(e.target.value)} placeholder="Write a message..." maxLength="4000"/><button className="primary" disabled={loading||!messageDraft.trim()}>Send</button></form>
+            <div className="chat-attachments"><label className="secondary attach-label">＋ Photo<input type="file" accept="image/*" disabled={mediaBusy} onChange={e=>{const file=e.target.files?.[0];if(file)sendChatMedia(file,"image");e.target.value="";}}/></label>{isRecording?<button type="button" className="recording-button" onClick={stopVoiceRecording}>■ Stop recording</button>:<button type="button" className="secondary" disabled={mediaBusy} onClick={startVoiceRecording}>● Record voice</button>}{mediaBusy&&<small className="muted">Sending attachment…</small>}{isRecording&&<small className="muted">Recording… tap stop when finished (max 2 minutes)</small>}</div>
           </>:<div className="chat-empty"><h3>Your private messages</h3><p className="muted">Choose a conversation or start a new one.</p><button className="primary" onClick={()=>setShowNewMessage(true)}>Start a message</button></div>}
         </section>
       </section>:activeTab==="profile"?<section className="panel profile-panel"><div className="profile-cover"/><div className="profile-avatar">{avatarUrl?<img src={avatarUrl} alt="Your profile"/>:initials(profile)}</div><h2>{displayName(profile)}</h2><p className="muted">@{profile?.username||"member"}</p><p>{profile?.bio||"No bio added yet."}</p><button className="primary" onClick={()=>setEditing(v=>!v)}>{editing?"Close editor":"Edit profile"}</button>
