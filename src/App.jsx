@@ -152,7 +152,8 @@ export default function App() {
     const image=kind==="image";
     const limit=image?5*1024*1024:10*1024*1024;
     if(file.size>limit){setMessage(image?"Choose an image smaller than 5 MB.":"Voice message must be under 10 MB.");return;}
-    const allowed=image?file.type.startsWith("image/"):/^audio\\/(webm|mp4|mpeg|ogg)$/.test(file.type);
+    const audioMime=file.type.split(";")[0];
+    const allowed=image?file.type.startsWith("image/"):["audio/webm","audio/mp4","audio/mpeg","audio/ogg"].includes(audioMime);
     if(!allowed){setMessage(image?"Choose a valid image file.":"This browser's audio format is not supported.");return;}
     setMediaBusy(true);setMessage("");
     try{
