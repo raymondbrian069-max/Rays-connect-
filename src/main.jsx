@@ -1,7 +1,42 @@
-import React, { useEffect, useState } from "react";
+import React, { Component, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 import "./style.css";
+
+class AppErrorBoundary extends Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Rays Connect render error:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main role="alert" style={{
+          minHeight: "100vh", display: "grid", placeContent: "center",
+          padding: 24, background: "#0a1020", color: "#f8fafc",
+          fontFamily: "system-ui, sans-serif", textAlign: "center"
+        }}>
+          <h1>Rays Connect couldn't load</h1>
+          <p style={{ color: "#cbd5e1" }}>
+            Something went wrong while opening the app. Reload the page to try again.
+          </p>
+          <button onClick={() => window.location.reload()} style={{
+            justifySelf: "center", border: 0, borderRadius: 10,
+            padding: "12px 18px", background: "#8059e8",
+            color: "white", fontWeight: 700
+          }}>Reload app</button>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function InstallAppPrompt() {
   const [installEvent, setInstallEvent] = useState(null);
@@ -35,9 +70,14 @@ function InstallAppPrompt() {
   if (installed || !installEvent) return null;
 
   const install = async () => {
-    await installEvent.prompt();
-    await installEvent.userChoice;
-    setInstallEvent(null);
+    try {
+      await installEvent.prompt();
+      await installEvent.userChoice;
+    } catch (error) {
+      console.error("Rays Connect installation prompt failed:", error);
+    } finally {
+      setInstallEvent(null);
+    }
   };
 
   return (
@@ -65,9 +105,9 @@ function InstallAppPrompt() {
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <>
+    <AppErrorBoundary>
       <App />
       <InstallAppPrompt />
-    </>
+    </AppErrorBoundary>
   </React.StrictMode>
 );
