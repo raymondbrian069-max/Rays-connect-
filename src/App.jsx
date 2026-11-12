@@ -37,6 +37,37 @@ export default function App() {
   const [showNewMessage,setShowNewMessage] = useState(false);
   const [isRecording,setIsRecording] = useState(false);
   const [mediaBusy,setMediaBusy] = useState(false);
+  const [musicTracks,setMusicTracks] = useState([]);
+  const [musicSearch,setMusicSearch] = useState("");
+  const [currentTrackId,setCurrentTrackId] = useState(null);
+  const musicInputRef = useRef(null);
+  const currentTrack = musicTracks.find(track=>track.id===currentTrackId) || null;
+  const visibleTracks = musicTracks.filter(track=>track.name.toLowerCase().includes(musicSearch.trim().toLowerCase()));
+
+  function addMusicFiles(files){
+    const selected=Array.from(files||[]);
+    const accepted=selected.filter(file=>file.type.startsWith("audio/"));
+    if(accepted.length!==selected.length)setMessage("Only audio files can be added to your music library.");
+    if(!accepted.length)return;
+    const added=accepted.map((file,index)=>({id:Date.now()+"-"+index+"-"+Math.random().toString(36).slice(2),name:file.name.replace(/\\.[^.]+$/,""),file,url:URL.createObjectURL(file)}));
+    setMusicTracks(current=>[...current,...added]);
+    setCurrentTrackId(current=>current||added[0]?.id||null);
+  }
+
+  function removeMusicTrack(track){
+    URL.revokeObjectURL(track.url);
+    setMusicTracks(current=>current.filter(item=>item.id!==track.id));
+    if(currentTrackId===track.id){const next=musicTracks.find(item=>item.id!==track.id);setCurrentTrackId(next?.id||null);}
+  }
+
+  function skipMusic(direction){
+    if(!musicTracks.length)return;
+    const index=musicTracks.findIndex(track=>track.id===currentTrackId);
+    const next=(index+(direction>0?1:-1)+musicTracks.length)%musicTracks.length;
+    setCurrentTrackId(musicTracks[next].id);
+  }
+
+  useEffect(()=>()=>{musicTracks.forEach(track=>URL.revokeObjectURL(track.url));},[]);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const recordStartedRef = useRef(0);
@@ -343,10 +374,10 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar"><a className="brand" href="#" onClick={e=>{e.preventDefault();setActiveTab("feed");}}>Rays<span>Connect</span></a><div className="top-actions"><button className="icon-button" onClick={()=>{setShowNotifications(v=>!v);loadNotifications();}} aria-label="Notifications">♧ <span className="notification-label">Notifications</span>{unread>0&&<i>{unread}</i>}</button><button className="avatar small-avatar" onClick={()=>setActiveTab("profile")}>{profile?.avatar_url?<img src={profile.avatar_url} alt="Profile"/>:initials(profile)}</button><button className="logout" onClick={logout}>Sign out</button></div></header>
     {showNotifications&&<section className="notifications panel"><div className="section-heading"><h3>Notifications</h3><button className="link-button" onClick={markAllRead}>Mark all read</button></div>{!notifications.length?<p className="muted">You're all caught up.</p>:notifications.map(n=><button key={n.id} className={"notification "+(!n.is_read?"unread":"")} onClick={()=>markRead(n.id)}><b>{displayName(n.actor)}</b> {n.message||((n.type||"").includes("like")?"liked your post.":(n.type||"").includes("reply")?"replied to your comment.":"interacted with you.")}<small>{dateText(n.created_at)}</small></button>)}</section>}
-    <nav className="tabs"><button className={activeTab==="feed"?"active":""} onClick={()=>setActiveTab("feed")}>⌂ Feed</button><button className={activeTab==="messages"?"active":""} onClick={()=>{setActiveTab("messages");loadInbox();}}>✉ Messages</button><button className={activeTab==="profile"?"active":""} onClick={()=>setActiveTab("profile")}>◎ My profile</button></nav>
+    <nav className="tabs"><button className={activeTab==="feed"?"active":""} onClick={()=>setActiveTab("feed")}>⌂ Feed</button><button className={activeTab==="messages"?"active":""} onClick={()=>{setActiveTab("messages");loadInbox();}}>✉ Messages</button><button className={activeTab==="music"?"active":""} onClick={()=>setActiveTab("music")}>♫ Music</button><button className={activeTab==="profile"?"active":""} onClick={()=>setActiveTab("profile")}>◎ My profile</button></nav>
     {message&&<div className="toast" role="status">{message}<button onClick={()=>setMessage("")}>×</button></div>}
     <main className="content">
-      {activeTab==="messages"?<section className="messages-layout">
+      {activeTab==="music"?<section className="music-page panel"><div className="section-heading"><div><h2>Music library</h2><p className="muted">Listen to audio files you add from your device.</p></div><button className="primary" onClick={()=>musicInputRef.current?.click()}>＋ Add songs</button><input ref={musicInputRef} type="file" accept="audio/*" multiple hidden onChange={e=>{addMusicFiles(e.target.files);e.target.value="";}}/></div><input className="music-search" placeholder="Search your songs..." value={musicSearch} onChange={e=>setMusicSearch(e.target.value)}/>{currentTrack&&<div className="music-player"><div className="music-art">♫</div><div className="music-now"><b>{currentTrack.name}</b><small>Now selected</small><audio key={currentTrack.id} controls autoPlay src={currentTrack.url} onEnded={()=>skipMusic(1)}>Your browser does not support audio playback.</audio></div><div className="music-skip"><button className="secondary" onClick={()=>skipMusic(-1)} aria-label="Previous song">◀</button><button className="secondary" onClick={()=>skipMusic(1)} aria-label="Next song">▶</button></div></div>}<div className="music-list">{visibleTracks.length?visibleTracks.map((track,index)=><div className={"music-track "+(track.id===currentTrackId?"selected":"")} key={track.id}><button className="track-play" onClick={()=>setCurrentTrackId(track.id)} aria-label={"Play "+track.name}>{track.id===currentTrackId?"♫":"▶"}</button><button className="track-name" onClick={()=>setCurrentTrackId(track.id)}><b>{track.name}</b><small>Audio file · {Math.max(1,Math.round(track.file.size/1024))} KB</small></button>{activeConversation&&<button className="link-button" onClick={()=>sendChatMedia(track.file,"audio")}>Share in chat</button>}<button className="remove-track" onClick={()=>removeMusicTrack(track)} aria-label={"Remove "+track.name}>×</button></div>):<div className="music-empty"><div className="music-art">♫</div><h3>{musicTracks.length?"No matching songs":"Your music library is empty"}</h3><p className="muted">Add audio files from your device to play them here. You can add multiple songs at once.</p><button className="primary" onClick={()=>musicInputRef.current?.click()}>Choose songs</button></div>}</div><p className="music-note">Music files stay on this device and are not uploaded automatically. Share a song in a conversation only when you have permission to share it.</p></section>:activeTab==="messages"?<section className="messages-layout">
         <aside className="panel inbox-panel">
           <div className="section-heading"><h3>Messages</h3><button className="primary" onClick={()=>setShowNewMessage(v=>!v)}>＋ New</button></div>
           {showNewMessage&&<div className="new-message"><input placeholder="Search people by name or username" value={peopleSearch} onChange={e=>setPeopleSearch(e.target.value)} onKeyDown={e=>e.key==="Enter"&&findPeople()}/><button className="secondary" onClick={findPeople}>Search</button>{people.map(person=><button className="person-result" key={person.id} onClick={()=>startConversation(person)}><b>{displayName(person)}</b><small>@{person.username}</small></button>)}</div>}
