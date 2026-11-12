@@ -21,6 +21,7 @@
     "lucide-react": "latest"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.6.0"
+    "@capacitor/cli": "8.6.0",
+    "typescript": "latest"
   }
 }
