@@ -28,6 +28,13 @@ export default function App() {
   const [loading,setLoading] = useState(false);
   const [message,setMessage] = useState("");
   const [activeTab,setActiveTab] = useState("feed");
+  const [inbox,setInbox] = useState([]);
+  const [activeConversation,setActiveConversation] = useState(null);
+  const [messages,setMessages] = useState([]);
+  const [messageDraft,setMessageDraft] = useState("");
+  const [peopleSearch,setPeopleSearch] = useState("");
+  const [people,setPeople] = useState([]);
+  const [showNewMessage,setShowNewMessage] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({data}) => setSession(data.session));
@@ -71,6 +78,65 @@ export default function App() {
     })));
   },[session]);
 
+  const loadInbox = useCallback(async () => {
+    if(!session?.user) return;
+    const me=session.user.id;
+    const mine=await supabase.from("conversation_members").select("conversation_id").eq("user_id",me);
+    if(mine.error){setMessage(mine.error.message);return;}
+    const ids=(mine.data||[]).map(x=>x.conversation_id);
+    if(!ids.length){setInbox([]);return;}
+    const [membersResult,messagesResult]=await Promise.all([
+      supabase.from("conversation_members").select("conversation_id,user_id").in("conversation_id",ids).neq("user_id",me),
+      supabase.from("messages").select("id,conversation_id,sender_id,content,created_at,read_at").in("conversation_id",ids).order("created_at",{ascending:false})
+    ]);
+    if(membersResult.error||messagesResult.error){setMessage((membersResult.error||messagesResult.error).message);return;}
+    const otherIds=[...new Set((membersResult.data||[]).map(x=>x.user_id))];
+    const profilesResult=otherIds.length?await supabase.from("user_profiles").select("id,username,full_name,avatar_url").in("id",otherIds):{data:[],error:null};
+    if(profilesResult.error){setMessage(profilesResult.error.message);return;}
+    const lastByConversation=new Map();
+    for(const msg of messagesResult.data||[]) if(!lastByConversation.has(msg.conversation_id)) lastByConversation.set(msg.conversation_id,msg);
+    setInbox(ids.map(id=>({id,person:(profilesResult.data||[]).find(p=>p.id===(membersResult.data||[]).find(m=>m.conversation_id===id)?.user_id),last:lastByConversation.get(id)})).sort((a,b)=>new Date(b.last?.created_at||0)-new Date(a.last?.created_at||0)));
+  },[session]);
+
+  const loadMessages = useCallback(async (conversationId) => {
+    if(!session?.user||!conversationId)return;
+    const {data,error}=await supabase.from("messages").select("*").eq("conversation_id",conversationId).order("created_at",{ascending:true}).limit(300);
+    if(error){setMessage(error.message);return;}
+    setMessages(data||[]);
+    await supabase.from("messages").update({read_at:new Date().toISOString()}).eq("conversation_id",conversationId).neq("sender_id",session.user.id).is("read_at",null);
+    loadInbox();
+  },[session,loadInbox]);
+
+  async function findPeople(){
+    const term=peopleSearch.trim();
+    if(!term){setPeople([]);return;}
+    const {data,error}=await supabase.from("user_profiles").select("id,username,full_name,avatar_url").or("username.ilike.%"+term+"%,full_name.ilike.%"+term+"%").neq("id",session.user.id).limit(20);
+    if(error)setMessage(error.message);else setPeople(data||[]);
+  }
+
+  async function startConversation(person){
+    const {data,error}=await supabase.rpc("create_direct_conversation",{target_user:person.id});
+    if(error){setMessage(error.message);return;}
+    setActiveConversation({id:data,person});
+    setMessages([]);
+    setShowNewMessage(false);
+    setPeopleSearch("");
+    setPeople([]);
+    setActiveTab("messages");
+    await loadMessages(data);
+    await loadInbox();
+  }
+
+  async function sendMessage(e){
+    e.preventDefault();
+    const content=messageDraft.trim();
+    if(!content||!activeConversation)return;
+    setLoading(true);
+    const {error}=await supabase.from("messages").insert({conversation_id:activeConversation.id,sender_id:session.user.id,content});
+    if(error)setMessage(error.message);else{setMessageDraft("");await loadMessages(activeConversation.id);}
+    setLoading(false);
+  }
+
   const loadNotifications = useCallback(async () => {
     if(!session?.user) return;
     const {data,error}=await supabase.from("notifications").select("*").eq("recipient_id",session.user.id).order("created_at",{ascending:false}).limit(50);
@@ -81,7 +147,7 @@ export default function App() {
     setNotifications(rows.map(n=>({...n,actor:people.find(p=>p.id===n.actor_id)})));
   },[session]);
 
-  useEffect(()=>{if(session){loadProfile();loadPosts();loadNotifications();}else{setProfile(null);setPosts([]);setNotifications([]);}},[session,loadProfile,loadPosts,loadNotifications]);
+  useEffect(()=>{if(session){loadProfile();loadPosts();loadNotifications();loadInbox();}else{setProfile(null);setPosts([]);setNotifications([]);setInbox([]);setMessages([]);}},[session,loadProfile,loadPosts,loadNotifications,loadInbox]);
 
   useEffect(()=>{
     if(!session?.user) return;
@@ -90,9 +156,10 @@ export default function App() {
       .on("postgres_changes",{event:"*",schema:"public",table:"comments"},()=>{loadPosts();loadNotifications();})
       .on("postgres_changes",{event:"*",schema:"public",table:"likes"},()=>{loadPosts();loadNotifications();})
       .on("postgres_changes",{event:"*",schema:"public",table:"notifications",filter:"recipient_id=eq."+session.user.id},loadNotifications)
+      .on("postgres_changes",{event:"*",schema:"public",table:"messages"},payload=>{loadInbox();if(activeConversation&&payload.new?.conversation_id===activeConversation.id)loadMessages(activeConversation.id);})
       .subscribe();
     return ()=>{supabase.removeChannel(channel);};
-  },[session,loadPosts,loadNotifications]);
+  },[session,loadPosts,loadNotifications,loadInbox,loadMessages,activeConversation]);
 
   async function handleAuth(e){
     e.preventDefault();setLoading(true);setMessage("");
@@ -216,10 +283,22 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar"><a className="brand" href="#" onClick={e=>{e.preventDefault();setActiveTab("feed");}}>Rays<span>Connect</span></a><div className="top-actions"><button className="icon-button" onClick={()=>{setShowNotifications(v=>!v);loadNotifications();}} aria-label="Notifications">♧ <span className="notification-label">Notifications</span>{unread>0&&<i>{unread}</i>}</button><button className="avatar small-avatar" onClick={()=>setActiveTab("profile")}>{profile?.avatar_url?<img src={profile.avatar_url} alt="Profile"/>:initials(profile)}</button><button className="logout" onClick={logout}>Sign out</button></div></header>
     {showNotifications&&<section className="notifications panel"><div className="section-heading"><h3>Notifications</h3><button className="link-button" onClick={markAllRead}>Mark all read</button></div>{!notifications.length?<p className="muted">You're all caught up.</p>:notifications.map(n=><button key={n.id} className={"notification "+(!n.is_read?"unread":"")} onClick={()=>markRead(n.id)}><b>{displayName(n.actor)}</b> {n.message||((n.type||"").includes("like")?"liked your post.":(n.type||"").includes("reply")?"replied to your comment.":"interacted with you.")}<small>{dateText(n.created_at)}</small></button>)}</section>}
-    <nav className="tabs"><button className={activeTab==="feed"?"active":""} onClick={()=>setActiveTab("feed")}>⌂ Feed</button><button className={activeTab==="profile"?"active":""} onClick={()=>setActiveTab("profile")}>◎ My profile</button></nav>
+    <nav className="tabs"><button className={activeTab==="feed"?"active":""} onClick={()=>setActiveTab("feed")}>⌂ Feed</button><button className={activeTab==="messages"?"active":""} onClick={()=>{setActiveTab("messages");loadInbox();}}>✉ Messages</button><button className={activeTab==="profile"?"active":""} onClick={()=>setActiveTab("profile")}>◎ My profile</button></nav>
     {message&&<div className="toast" role="status">{message}<button onClick={()=>setMessage("")}>×</button></div>}
     <main className="content">
-      {activeTab==="profile"?<section className="panel profile-panel"><div className="profile-cover"/><div className="profile-avatar">{avatarUrl?<img src={avatarUrl} alt="Your profile"/>:initials(profile)}</div><h2>{displayName(profile)}</h2><p className="muted">@{profile?.username||"member"}</p><p>{profile?.bio||"No bio added yet."}</p><button className="primary" onClick={()=>setEditing(v=>!v)}>{editing?"Close editor":"Edit profile"}</button>
+      {activeTab==="messages"?<section className="messages-layout">
+        <aside className="panel inbox-panel">
+          <div className="section-heading"><h3>Messages</h3><button className="primary" onClick={()=>setShowNewMessage(v=>!v)}>＋ New</button></div>
+          {showNewMessage&&<div className="new-message"><input placeholder="Search people by name or username" value={peopleSearch} onChange={e=>setPeopleSearch(e.target.value)} onKeyDown={e=>e.key==="Enter"&&findPeople()}/><button className="secondary" onClick={findPeople}>Search</button>{people.map(person=><button className="person-result" key={person.id} onClick={()=>startConversation(person)}><b>{displayName(person)}</b><small>@{person.username}</small></button>)}</div>}
+          {!inbox.length?<p className="muted">No conversations yet. Start a new message to find someone.</p>:inbox.map(item=><button key={item.id} className={"conversation-item "+(activeConversation?.id===item.id?"selected":"")} onClick={()=>{setActiveConversation({id:item.id,person:item.person});loadMessages(item.id);}}><span className="avatar">{item.person?.avatar_url?<img src={item.person.avatar_url} alt=""/>:initials(item.person)}</span><span className="conversation-copy"><b>{displayName(item.person)}</b><small>{item.last?.content||"Start a conversation"}</small></span></button>)}
+        </aside>
+        <section className="panel chat-panel">
+          {activeConversation?<><div className="chat-heading"><button className="back-inbox" onClick={()=>setActiveConversation(null)}>‹</button><div className="avatar">{activeConversation.person?.avatar_url?<img src={activeConversation.person.avatar_url} alt=""/>:initials(activeConversation.person)}</div><div><b>{displayName(activeConversation.person)}</b><small>@{activeConversation.person?.username||"member"}</small></div></div>
+            <div className="message-list">{messages.map(msg=><div key={msg.id} className={"message-bubble "+(msg.sender_id===session.user.id?"mine":"theirs")}><p>{msg.content}</p><small>{dateText(msg.created_at)}</small></div>)}</div>
+            <form className="send-message-form" onSubmit={sendMessage}><input value={messageDraft} onChange={e=>setMessageDraft(e.target.value)} placeholder="Write a message..." maxLength="4000"/><button className="primary" disabled={loading||!messageDraft.trim()}>Send</button></form>
+          </>:<div className="chat-empty"><h3>Your private messages</h3><p className="muted">Choose a conversation or start a new one.</p><button className="primary" onClick={()=>setShowNewMessage(true)}>Start a message</button></div>}
+        </section>
+      </section>:activeTab==="profile"?<section className="panel profile-panel"><div className="profile-cover"/><div className="profile-avatar">{avatarUrl?<img src={avatarUrl} alt="Your profile"/>:initials(profile)}</div><h2>{displayName(profile)}</h2><p className="muted">@{profile?.username||"member"}</p><p>{profile?.bio||"No bio added yet."}</p><button className="primary" onClick={()=>setEditing(v=>!v)}>{editing?"Close editor":"Edit profile"}</button>
         {editing&&<form className="profile-form" onSubmit={saveProfile}><label>Profile photo<input type="file" accept="image/*" onChange={uploadAvatar}/></label>{avatarUrl&&<img className="avatar-preview" src={avatarUrl} alt="Preview"/>}<label>Username<input value={username} onChange={e=>setUsername(e.target.value)} minLength="3" required/></label><label>Full name<input value={fullName} onChange={e=>setFullName(e.target.value)}/></label><label>Bio<textarea rows="3" maxLength="300" value={bio} onChange={e=>setBio(e.target.value)}/></label><button className="primary" disabled={loading}>Save profile</button></form>}
         <div className="profile-stats"><b>{posts.filter(p=>p.user_id===session.user.id).length} <small>Posts</small></b><b>{profile?.username?"Active":"New"} <small>Account</small></b></div>
       </section>:<div className="feed-layout"><section className="feed-column"><form className="composer panel" onSubmit={createPost}><div className="composer-title"><div className="avatar">{initials(profile)}</div><b>Share something with your people</b></div><textarea rows="3" placeholder="What's happening?" maxLength="5000" value={postContent} onChange={e=>setPostContent(e.target.value)}/><div className="composer-footer"><label className="file-label">＋ Photo<input type="file" accept="image/*" onChange={e=>setPostImage(e.target.files?.[0]||null)}/></label><span className="muted">{postImage?.name||"Up to 5 MB"}</span><button className="primary" disabled={loading}>{loading?"Posting...":"Publish post"}</button></div></form>
