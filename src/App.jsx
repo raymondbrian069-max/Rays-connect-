@@ -14,6 +14,7 @@ export default function App() {
   const [showNotifications,setShowNotifications] = useState(false);
   const [mode,setMode] = useState("login");
   const [email,setEmail] = useState("");
+  const [loginUsername,setLoginUsername] = useState("");
   const [password,setPassword] = useState("");
   const [username,setUsername] = useState("");
   const [fullName,setFullName] = useState("");
@@ -286,11 +287,14 @@ export default function App() {
       if(mode==="signup"){
         const {data,error}=await supabase.auth.signUp({email:email.trim(),password,options:{data:{username:username.trim()},emailRedirectTo:window.location.origin}});
         if(error) throw error;
-        setMessage(data.session?"Account created successfully.":"Account created. Check your email to confirm, then sign in.");
+        setMessage(data.session?"Account created successfully.":"Account created. Check your email to confirm, then sign in with your username.");
         setMode("login");
       }else{
-        const {error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
+        const {data,error}=await supabase.functions.invoke("username-login",{body:{username:loginUsername.trim(),password}});
         if(error) throw error;
+        if(!data?.session?.access_token||!data?.session?.refresh_token) throw new Error("Invalid username or password.");
+        const {error:sessionError}=await supabase.auth.setSession({access_token:data.session.access_token,refresh_token:data.session.refresh_token});
+        if(sessionError) throw sessionError;
       }
     }catch(err){setMessage(err.message||"Authentication failed.");}finally{setLoading(false);}
   }
@@ -393,9 +397,8 @@ export default function App() {
   }
 
   if(!session)return <div className="auth-page"><div className="auth-card"><div className="brand">Rays<span>Connect</span></div><p className="tagline">Your moments. Your people.</p><h2>{mode==="signup"?"Create your account":"Welcome back"}</h2><form onSubmit={handleAuth}>
-    {mode==="signup"&&<input placeholder="Choose a username" value={username} onChange={e=>setUsername(e.target.value)} minLength="3" required/>}
-    <input type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} required/>
-    <input type="password" placeholder="Password (at least 8 characters)" value={password} onChange={e=>setPassword(e.target.value)} minLength="8" required/>
+    {mode==="signup"?<><input placeholder="Choose a username" value={username} onChange={e=>setUsername(e.target.value)} minLength="3" required/><input type="email" placeholder="Email address (for account registration)" value={email} onChange={e=>setEmail(e.target.value)} required/></>:<input autoComplete="username" placeholder="Username" value={loginUsername} onChange={e=>setLoginUsername(e.target.value)} required/>}
+    <input type="password" autoComplete={mode==="signup"?"new-password":"current-password"} placeholder="Password (at least 8 characters)" value={password} onChange={e=>setPassword(e.target.value)} minLength="8" required/>
     <button className="primary" disabled={loading}>{loading?"Please wait...":mode==="signup"?"Create account":"Sign in"}</button>
   </form>{message&&<p className="notice">{message}</p>}<p className="switch-auth">{mode==="signup"?"Already registered?":"New to Rays Connect?"} <button className="link-button" onClick={()=>{setMode(mode==="signup"?"login":"signup");setMessage("");}}>{mode==="signup"?"Sign in":"Create account"}</button></p></div></div>;
 
